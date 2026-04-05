@@ -1,0 +1,46 @@
+[Unit]
+Description=GitHub Copilot API Proxy Socket v2.0
+Documentation=https://github.com/dcx7c5/copilot-api-proxy
+PartOf=copilot-api-proxy.service
+Before=copilot-api-proxy.service
+
+[Socket]
+# Socket configuration
+ListenStream=/run/copilot-api-proxy/copilot-proxy.sock
+SocketUser=copilot-api-proxy
+SocketGroup=caddy
+SocketMode=0660
+
+# Directory permissions
+DirectoryMode=0755
+
+# Socket tuning for production
+Backlog=256
+KeepAlive=yes
+KeepAliveTimeSec=30
+KeepAliveIntervalSec=5
+KeepAliveProbes=3
+
+# Rate limiting to prevent abuse
+TriggerLimitIntervalSec=5s
+TriggerLimitBurst=50
+
+# Connection limits
+MaxConnections=100
+MaxConnectionsPerSource=10
+
+# Performance optimizations
+ReceiveBuffer=65536
+SendBuffer=65536
+IPTOS=throughput
+
+# IPv6 support (if needed)
+BindIPv6Only=ipv6-only
+
+# Security
+RemoveOnStop=yes
+Symlinks=no
+FreeBind=no
+
+[Install]
+WantedBy=sockets.target

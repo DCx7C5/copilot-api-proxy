@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid">
+    <div class="card">
+        <h2>🚀 Service Overview</h2>
+        <p>Welcome to the GitHub Copilot API Proxy! This service provides an OpenAI-compatible API interface for GitHub Copilot, allowing you to integrate Copilot's AI capabilities into your applications.</p>
+
+        <div style="margin: 2rem 0;">
+            <h3>🔑 Quick Start</h3>
+            <ol>
+                <li><strong>Get your API token:</strong> <a href="/login" class="button">Authenticate with GitHub</a></li>
+                <li><strong>Use the API:</strong> Configure your OpenAI client to use <code>{{ base_url }}/v1</code></li>
+                <li><strong>Start coding:</strong> Make requests to <code>/v1/chat/completions</code></li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Service Status</h2>
+        <div style="display: flex; gap: 1rem; align-items: center; margin: 1rem 0;">
+            <span class="status healthy">● Service Healthy</span>
+            <a href="/health" class="button secondary" style="font-size: 0.9rem;">View Details</a>
+        </div>
+
+        <h3>📈 Monitoring</h3>
+        <ul style="margin-left: 2rem;">
+            <li><a href="/dashboard">Service Dashboard</a></li>
+            <li><a href="/docs">Interactive API Documentation</a></li>
+            <li><a href="/redoc">API Reference</a></li>
+        </ul>
+    </div>
+</div>
+
+<div class="card">
+    <h2>💻 Usage Examples</h2>
+
+    <h3>🐍 Python (OpenAI SDK)</h3>
+    <pre><code>import openai
+
+client = openai.OpenAI(
+    api_key="your-token-from-authentication",
+    base_url="{{ base_url }}/v1"
+)
+
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": "Write a Python function to calculate fibonacci"}
+    ]
+)
+
+print(response.choices[0].message.content)</code></pre>
+
+    <h3>🌐 cURL</h3>
+    <pre><code>curl -X POST {{ base_url }}/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [
+      {"role": "user", "content": "Hello, GitHub Copilot!"}
+    ]
+  }'</code></pre>
+
+    <h3>🟨 JavaScript/Node.js</h3>
+    <pre><code>import OpenAI from 'openai';
+
+const openai = new OpenAI({
+    apiKey: 'your-token-from-authentication',
+    baseURL: '{{ base_url }}/v1'
+});
+
+const completion = await openai.chat.completions.create({
+    messages: [{ role: 'user', content: 'Generate a React component' }],
+    model: 'gpt-4',
+});
+
+console.log(completion.choices[0].message);</code></pre>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <h2>🛡️ Security Features</h2>
+        <ul style="margin-left: 2rem;">
+            <li>✅ OAuth2 authentication via GitHub</li>
+            <li>✅ Secure token storage with encryption</li>
+            <li>✅ Rate limiting and request validation</li>
+            <li>✅ Unix domain socket communication</li>
+            <li>✅ TLS termination via reverse proxy</li>
+            <li>✅ Systemd security hardening</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>⚙️ Configuration</h2>
+        <p>This service supports multiple deployment modes:</p>
+        <ul style="margin-left: 2rem;">
+            <li><strong>Unix Socket + Caddy:</strong> Recommended for production</li>
+            <li><strong>Direct TLS:</strong> For standalone deployments</li>
+            <li><strong>Development Mode:</strong> For local development</li>
+        </ul>
+
+        <p style="margin-top: 1rem;">
+            <small>Configuration is managed via <code>/etc/copilot-api-proxy/config.env</code></small>
+        </p>
+    </div>
+</div>
+
+<div class="alert info">
+    <strong>💡 Need Help?</strong>
+    Check the <a href="/docs">API Documentation</a> for detailed information about endpoints, authentication, and usage examples.
+</div>
+{% endblock %}

@@ -1,0 +1,116 @@
+[Unit]
+Description=GitHub Copilot API Proxy v2.0
+Documentation=https://github.com/yourusername/copilot-api-proxy
+Requires=copilot-api-proxy.socket
+After=network.target network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=notify
+User=copilot-api-proxy
+Group=copilot-api-proxy
+WorkingDirectory=/usr/lib/copilot-api-proxy
+
+# Environment configuration
+EnvironmentFile=-/etc/copilot-api-proxy/config.env
+EnvironmentFile=-/etc/copilot-api-proxy/local.env
+Environment=PYTHONPATH=/usr/lib/copilot-api-proxy
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Execution
+ExecStart=/usr/bin/copilot-api-proxy
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Restart configuration
+Restart=always
+RestartSec=10
+
+
+# Runtime directories with proper permissions
+RuntimeDirectory=copilot-api-proxy
+RuntimeDirectoryMode=0755
+StateDirectory=copilot-api-proxy
+StateDirectoryMode=0750
+LogsDirectory=copilot-api-proxy
+LogsDirectoryMode=0755
+CacheDirectory=copilot-api-proxy
+CacheDirectoryMode=0755
+ConfigurationDirectory=copilot-api-proxy
+ConfigurationDirectoryMode=0750
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryHigh=512M
+MemoryMax=1G
+TasksMax=256
+
+# Security hardening - Enhanced
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+PrivateNetwork=no
+ProtectSystem=strict
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# File system access
+ReadWritePaths=/var/lib/copilot-api-proxy /var/log/copilot-api-proxy /run/copilot-api-proxy
+ReadOnlyPaths=/etc /usr
+InaccessiblePaths=/proc/acpi /proc/apm /proc/asound /proc/bus /proc/fs /proc/irq /proc/sys /proc/sysrq-trigger
+TemporaryFileSystem=/tmp /var/tmp
+
+# Network restrictions
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+IPAddressAllow=10.0.0.0/8
+IPAddressAllow=172.16.0.0/12
+IPAddressAllow=192.168.0.0/16
+
+# Capability restrictions
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# System call filtering
+SystemCallFilter=@system-service @signal @network-io
+SystemCallFilter=~@debug @mount @cpu-emulation @obsolete @privileged @reboot @swap @raw-io @clock @module @resources
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+
+# Additional restrictions
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+UMask=0027
+KeyringMode=private
+
+# Memory protections
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+
+# Device access
+DevicePolicy=closed
+DeviceAllow=/dev/null rw
+DeviceAllow=/dev/zero rw
+DeviceAllow=/dev/full rw
+DeviceAllow=/dev/random r
+DeviceAllow=/dev/urandom r
+
+[Install]
+WantedBy=multi-user.target

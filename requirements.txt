@@ -1,0 +1,23 @@
+# Core FastAPI and server dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+httpx>=0.25.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+
+# Configuration management
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Security and rate limiting
+slowapi>=0.1.9
+cryptography>=41.0.0
+
+# Development and debugging (optional)
+python-dotenv>=1.0.0
+
+# Logging enhancement (optional)
+json-log-formatter>=0.5.0
+
+# Production deployment
+gunicorn>=21.0.0

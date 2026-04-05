@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - GitHub Copilot API Proxy{% endblock %}
+{% block header_title %}Service Dashboard{% endblock %}
+{% block header_subtitle %}Monitor your GitHub Copilot API Proxy{% endblock %}
+
+{% block extra_head %}
+<script>
+    async function refreshStats() {
+        try {
+            const response = await fetch('/health');
+            const data = await response.json();
+
+            document.getElementById('status').textContent = data.status;
+            document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleString();
+            document.getElementById('active-tokens').textContent = data.active_tokens;
+
+            // Update status indicator
+            const statusEl = document.getElementById('status-indicator');
+            statusEl.className = data.status === 'healthy' ? 'status healthy' : 'status error';
+            statusEl.innerHTML = data.status === 'healthy' ? '● Healthy' : '● Unhealthy';
+        } catch (error) {
+            console.error('Failed to refresh stats:', error);
+            document.getElementById('status-indicator').innerHTML = '<span class="status error">● Error</span>';
+        }
+    }
+
+    // Auto-refresh every 30 seconds
+    setInterval(refreshStats, 30000);
+
+    // Refresh on page load
+    document.addEventListener('DOMContentLoaded', refreshStats);
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="grid">
+    <div class="card">
+        <h2>🟢 Service Status</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin: 1rem 0;">
+            <span id="status-indicator" class="status healthy">● Healthy</span>
+            <button onclick="refreshStats()" class="button secondary" style="font-size: 0.9rem;">Refresh</button>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+            <p><strong>Status:</strong> <span id="status">healthy</span></p>
+            <p><strong>Last Updated:</strong> <span id="timestamp">Loading...</span></p>
+            <p><strong>Base URL:</strong> <code>{{ base_url }}</code></p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Statistics</h2>
+        <div style="font-size: 2rem; font-weight: bold; color: #667eea; text-align: center; margin: 1rem 0;">
+            <span id="active-tokens">{{ tokens }}</span>
+        </div>
+        <p style="text-align: center; color: #666;">Active Authentication Tokens</p>
+
+        <div style="margin-top: 1.5rem;">
+            <a href="/login" class="button" style="width: 100%; text-align: center;">
+                🔑 Create New Token
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>🔗 API Endpoints</h2>
+    <div class="grid">
+        <div>
+            <h3>OpenAI-Compatible Endpoints</h3>
+            <ul style="margin-left: 1rem;">
+                <li><code>POST /v1/chat/completions</code> - Chat completions</li>
+                <li><code>GET /v1/models</code> - List available models</li>
+            </ul>
+        </div>
+
+        <div>
+            <h3>Management Endpoints</h3>
+            <ul style="margin-left: 1rem;">
+                <li><code>GET /health</code> - Health check</li>
+                <li><code>GET /login</code> - Start authentication</li>
+                <li><code>GET /auth/callback</code> - OAuth callback</li>
+            </ul>
+        </div>
+    </div>
+
+    <div style="margin-top: 2rem;">
+        <a href="/docs" target="_blank" class="button">📖 View Full API Documentation</a>
+        <a href="/redoc" target="_blank" class="button secondary">📚 Alternative Documentation</a>
+    </div>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <h2>🛠️ Quick Actions</h2>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <a href="/health" class="button secondary">Check Health</a>
+            <a href="/login" class="button">Authenticate</a>
+            <a href="/docs" class="button secondary">API Docs</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📋 Recent Activity</h2>
+        <p style="color: #666; font-style: italic;">Activity monitoring will be available in a future update.</p>
+        <div style="margin-top: 1rem;">
+            <small>Features planned:</small>
+            <ul style="margin-left: 2rem; margin-top: 0.5rem;">
+                <li>Request volume metrics</li>
+                <li>Token usage statistics</li>
+                <li>Error rate monitoring</li>
+                <li>Performance metrics</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="alert info">
+    <strong>💡 Pro Tip:</strong>
+    This dashboard automatically refreshes every 30 seconds to show the latest service status.
+    You can also click the "Refresh" button to update immediately.
+</div>
+{% endblock %}

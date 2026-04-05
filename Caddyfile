@@ -1,0 +1,349 @@
+# GitHub Copilot API Proxy - Caddy Configuration v2.0
+# Production-ready configuration with multiple deployment options
+#
+# Usage modes:
+# 1. Import into main Caddyfile: import /etc/caddy/conf.d/copilot-api-proxy
+# 2. Use as standalone Caddyfile
+# 3. Include in docker-compose or similar setups
+
+# ==================== CONFIGURATION VARIABLES ====================
+# You can override these by setting environment variables:
+# COPILOT_DOMAIN=localhost:8443
+# COPILOT_SOCKET=/run/copilot-api-proxy/copilot-proxy.sock
+# COPILOT_LOG_LEVEL=INFO
+
+# Default configuration
+{$COPILOT_DOMAIN:localhost:8443} {
+    # ==================== TLS CONFIGURATION ====================
+    # Automatic TLS with Let's Encrypt for production domains
+    # Self-signed certificate for localhost/development
+    {$COPILOT_TLS_MODE:tls internal}
+
+    # Custom certificate paths (uncomment for custom certs)
+    # tls {$COPILOT_TLS_CERT} {$COPILOT_TLS_KEY}
+
+    # ==================== SECURITY HEADERS ====================
+    header {
+        # HSTS - Adjust max-age based on your requirements
+        Strict-Transport-Security "max-age={$COPILOT_HSTS_MAX_AGE:31536000}; includeSubDomains; preload"
+
+        # Content Security Policy - Restrictive for security
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'self'"
+
+        # Security headers
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=(), screen-wake-lock=(), web-share=()"
+
+        # Remove server information
+        -Server
+        -X-Powered-By
+        -X-Generator
+
+        # API response headers
+        X-API-Version "2.0"
+        X-Service-Name "Copilot-API-Proxy"
+    }
+
+    # ==================== RATE LIMITING ====================
+    # Global rate limiting (can be adjusted per path)
+    rate_limit {
+        zone global {
+            key    {remote_host}
+            events {$COPILOT_RATE_LIMIT_REQUESTS:100}
+            window {$COPILOT_RATE_LIMIT_WINDOW:1m}
+        }
+
+        zone api {
+            key    {remote_host}
+            events {$COPILOT_API_RATE_LIMIT:50}
+            window 1m
+        }
+
+        zone auth {
+            key    {remote_host}
+            events 10
+            window 5m
+        }
+    }
+
+    # ==================== CORS CONFIGURATION ====================
+    # CORS for API endpoints (configurable)
+    @cors_preflight method OPTIONS
+    handle @cors_preflight {
+        header {
+            Access-Control-Allow-Origin "{$COPILOT_CORS_ORIGIN:*}"
+            Access-Control-Allow-Methods "GET, POST, OPTIONS"
+            Access-Control-Allow-Headers "Authorization, Content-Type"
+            Access-Control-Max-Age "86400"
+        }
+        respond 200
+    }
+
+    # ==================== HEALTH CHECK (BYPASS AUTH) ====================
+    handle /health {
+        # Allow health checks without authentication
+        reverse_proxy unix/{$COPILOT_SOCKET:/run/copilot-api-proxy/copilot-proxy.sock} {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+
+            # Health check specific settings
+            health_uri /health
+            health_interval {$COPILOT_HEALTH_INTERVAL:30s}
+            health_timeout {$COPILOT_HEALTH_TIMEOUT:5s}
+        }
+    }
+
+    # ==================== API ROUTES WITH ENHANCED RATE LIMITING ====================
+    @api_routes path /v1/* /login /auth/*
+    handle @api_routes {
+        # Apply API-specific rate limiting
+        rate_limit api
+
+        reverse_proxy unix/{$COPILOT_SOCKET:/run/copilot-api-proxy/copilot-proxy.sock} {
+            # Enhanced headers for API routes
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+            header_up X-Request-Start {time.unix}
+
+            # Timeouts for API calls (longer for AI processing)
+            dial_timeout {$COPILOT_DIAL_TIMEOUT:5s}
+            read_timeout {$COPILOT_READ_TIMEOUT:120s}
+            write_timeout {$COPILOT_WRITE_TIMEOUT:60s}
+
+            # Connection pooling
+            keepalive {$COPILOT_KEEPALIVE_CONNECTIONS:10}
+            keepalive_idle_timeout {$COPILOT_KEEPALIVE_TIMEOUT:30s}
+
+            # Health monitoring
+            health_uri /health
+            health_interval {$COPILOT_HEALTH_INTERVAL:30s}
+            health_timeout {$COPILOT_HEALTH_TIMEOUT:5s}
+            health_status 2xx
+
+            # Retry configuration
+            health_passes 2
+            health_fails 3
+        }
+    }
+
+    # ==================== AUTH ROUTES WITH STRICTER RATE LIMITING ====================
+    @auth_routes path /auth/*
+    handle @auth_routes {
+        # Apply stricter rate limiting for auth endpoints
+        rate_limit auth
+
+        reverse_proxy unix/{$COPILOT_SOCKET:/run/copilot-api-proxy/copilot-proxy.sock} {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+
+            # Shorter timeouts for auth
+            dial_timeout 5s
+            read_timeout 30s
+            write_timeout 30s
+        }
+    }
+
+    # ==================== MAIN PROXY (ALL OTHER ROUTES) ====================
+    reverse_proxy unix/{$COPILOT_SOCKET:/run/copilot-api-proxy/copilot-proxy.sock} {
+        # Standard proxy headers
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+        header_up X-Request-ID {uuid}
+
+        # Response headers
+        header_down X-Cache-Status "MISS"
+        header_down X-Response-Time "{duration}ms"
+
+        # Connection settings
+        dial_timeout {$COPILOT_DIAL_TIMEOUT:5s}
+        read_timeout {$COPILOT_READ_TIMEOUT:60s}
+        write_timeout {$COPILOT_WRITE_TIMEOUT:60s}
+
+        # Health monitoring
+        health_uri /health
+        health_interval {$COPILOT_HEALTH_INTERVAL:30s}
+        health_timeout {$COPILOT_HEALTH_TIMEOUT:5s}
+        health_status 2xx
+        health_headers {
+            User-Agent "Caddy-Health-Check"
+        }
+
+        # Connection pooling
+        keepalive {$COPILOT_KEEPALIVE_CONNECTIONS:20}
+        keepalive_idle_timeout {$COPILOT_KEEPALIVE_TIMEOUT:60s}
+
+        # Load balancing (for future scaling)
+        lb_policy round_robin
+        health_passes 2
+        health_fails 3
+    }
+
+    # ==================== STATIC FILE CACHING ====================
+    @static {
+        path *.css *.js *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf
+    }
+    handle @static {
+        header Cache-Control "public, max-age=31536000"
+        header X-Cache-Status "HIT"
+
+        reverse_proxy unix/{$COPILOT_SOCKET:/run/copilot-api-proxy/copilot-proxy.sock} {
+            header_up Host {upstream_hostport}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+
+    # ==================== LOGGING ====================
+    log {
+        output file {$COPILOT_LOG_PATH:/var/log/copilot-api-proxy/caddy-access.log} {
+            roll_size {$COPILOT_LOG_ROLL_SIZE:10MiB}
+            roll_keep {$COPILOT_LOG_ROLL_KEEP:5}
+            roll_keep_for {$COPILOT_LOG_ROLL_KEEP_FOR:168h}
+        }
+
+        # Structured JSON logging for better analysis
+        format json {
+            time_format "2006-01-02T15:04:05.000Z07:00"
+            message_key "msg"
+            level_key "level"
+            time_key "ts"
+            logger_key "logger"
+            request {
+                remote_ip {remote_host}
+                remote_port {remote_port}
+                client_ip {client_ip}
+                proto {proto}
+                method {method}
+                host {host}
+                uri {uri}
+                headers {
+                    User-Agent {>User-Agent}
+                    Referer {>Referer}
+                    Authorization {>Authorization}
+                }
+            }
+            response {
+                status {status}
+                size {size}
+                latency {duration}
+                headers {
+                    Content-Type {<Content-Type}
+                }
+            }
+        }
+
+        level {$COPILOT_LOG_LEVEL:INFO}
+
+        # Include/exclude specific requests
+        include http.request.method POST
+        include http.request.uri.path /v1/*
+        exclude http.request.uri.path /health
+    }
+
+    # ==================== ERROR HANDLING ====================
+    handle_errors {
+        @5xx expression {http.error.status_code} >= 500
+        handle @5xx {
+            header Content-Type "application/json"
+            respond `{
+                "error": {
+                    "message": "Service temporarily unavailable. Please try again later.",
+                    "type": "service_unavailable",
+                    "code": {http.error.status_code},
+                    "timestamp": "{time.now.unix}",
+                    "request_id": "{uuid}"
+                }
+            }` {http.error.status_code}
+        }
+
+        @4xx expression {http.error.status_code} >= 400
+        @4xx expression {http.error.status_code} < 500
+        handle @4xx {
+            header Content-Type "application/json"
+            respond `{
+                "error": {
+                    "message": "Request error occurred.",
+                    "type": "client_error",
+                    "code": {http.error.status_code},
+                    "timestamp": "{time.now.unix}",
+                    "request_id": "{uuid}"
+                }
+            }` {http.error.status_code}
+        }
+
+        handle {
+            header Content-Type "application/json"
+            respond `{
+                "error": {
+                    "message": "An unexpected error occurred.",
+                    "type": "unknown_error",
+                    "code": {http.error.status_code},
+                    "timestamp": "{time.now.unix}",
+                    "request_id": "{uuid}"
+                }
+            }` {http.error.status_code}
+        }
+    }
+
+    # ==================== METRICS ENDPOINT (OPTIONAL) ====================
+    # Uncomment to enable metrics collection
+    # handle /metrics {
+    #     metrics /metrics
+    # }
+}
+
+# ==================== ALTERNATIVE CONFIGURATIONS ====================
+
+# Example: Custom domain configuration
+# your-domain.com {
+#     import copilot_proxy_config
+# }
+
+# Example: Multiple environment configuration
+# localhost:8443, dev.copilot.local {
+#     tls internal
+#     import copilot_proxy_config
+# }
+
+# staging.your-domain.com {
+#     import copilot_proxy_config
+# }
+
+# ==================== GLOBAL CONFIGURATION ====================
+{
+    # Global Caddy settings
+    admin off
+
+    # Security settings
+    servers {
+        protocol {
+            allow_h2c
+            strict_sni_host on
+        }
+    }
+
+    # Default error page
+    error {
+        * {
+            header Content-Type "application/json"
+            respond `{"error":{"message":"Service not found","code":404}}` 404
+        }
+    }
+}
