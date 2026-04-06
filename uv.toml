@@ -4,6 +4,7 @@ version = "2.0.1"
 requires-python = ">=3.11"
 dependencies = []
 
+
 [tool.uv]
 dev-dependencies = []
 package = true
