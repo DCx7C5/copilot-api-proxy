@@ -1,6 +1,7 @@
 # Core FastAPI and server dependencies
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
+uvloop>=0.21.0
 httpx>=0.25.0
 jinja2>=3.1.0
 python-multipart>=0.0.6

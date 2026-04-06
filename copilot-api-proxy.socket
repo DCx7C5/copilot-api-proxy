@@ -30,12 +30,12 @@ MaxConnections=100
 MaxConnectionsPerSource=10
 
 # Performance optimizations
-ReceiveBuffer=65536
-SendBuffer=65536
+ReceiveBuffer=65535
+SendBuffer=65535
 IPTOS=throughput
 
 # IPv6 support (if needed)
-BindIPv6Only=ipv6-only
+# BindIPv6Only=ipv6-only
 
 # Security
 RemoveOnStop=yes

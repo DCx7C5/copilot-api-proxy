@@ -64,7 +64,7 @@ def setup_environment():
         create_runtime_environment()
 
 def create_runtime_environment():
-    """Create runtime virtual environment using uv (fallback)"""
+    """Create a runtime virtual environment using uv (fallback)"""
     try:
         runtime_venv = DATA_DIR / ".venv"
 
@@ -179,25 +179,21 @@ def get_uvicorn_config() -> dict:
     """Get uvicorn configuration from settings"""
     try:
         # Import after environment setup
-        from config import get_settings
+        from config import get_settings, config_manager as cfg_mgr
 
-        settings = get_settings()
-        config_manager = settings.__class__.__module__.split('.')[0] + '.config_manager'
-
-        # Get uvicorn config from the settings
-        return settings.config_manager.get_uvicorn_config()
+        get_settings()  # ensure settings are loaded into config_manager
+        return cfg_mgr.get_uvicorn_config()
 
     except Exception as e:
         logging.error(f"Failed to load settings: {e}")
 
         # Fallback configuration
-        server_mode = os.getenv("SERVER__MODE", "unix_socket")
+        server_mode = os.getenv("SERVER__MODE", "tls_socket")
 
-        if server_mode == "unix_socket":
+        if server_mode == "tls_socket":
             return {
                 "app": "main:app",
                 "uds": os.getenv("SERVER__UNIX_SOCKET_PATH", "/run/copilot-api-proxy/copilot-proxy.sock"),
-                "umask": 0o007,
                 "log_level": os.getenv("LOGGING_CONFIG__LEVEL", "info").lower(),
                 "access_log": True,
             }
@@ -264,6 +260,10 @@ def main():
         socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
 
     logging.info(f"Starting server with config: {uvicorn_config}")
+
+    # Set umask for Unix socket so only owner+group can access (mode 0o660)
+    if "uds" in uvicorn_config:
+        os.umask(0o007)
 
     # Start the server
     try:

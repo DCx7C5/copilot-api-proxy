@@ -1,14 +1,13 @@
 [Unit]
 Description=GitHub Copilot API Proxy v2.0
-Documentation=https://github.com/yourusername/copilot-api-proxy
-Requires=copilot-api-proxy.socket
+Documentation=https://github.com/dcx7c5/copilot-api-proxy
 After=network.target network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
 StartLimitBurst=3
 
 [Service]
-Type=notify
+Type=exec
 User=copilot-api-proxy
 Group=copilot-api-proxy
 WorkingDirectory=/usr/lib/copilot-api-proxy
@@ -43,7 +42,7 @@ LogsDirectoryMode=0755
 CacheDirectory=copilot-api-proxy
 CacheDirectoryMode=0755
 ConfigurationDirectory=copilot-api-proxy
-ConfigurationDirectoryMode=0750
+ConfigurationDirectoryMode=0755
 
 # Resource limits
 LimitNOFILE=65536
@@ -71,11 +70,11 @@ ProcSubset=pid
 # File system access
 ReadWritePaths=/var/lib/copilot-api-proxy /var/log/copilot-api-proxy /run/copilot-api-proxy
 ReadOnlyPaths=/etc /usr
-InaccessiblePaths=/proc/acpi /proc/apm /proc/asound /proc/bus /proc/fs /proc/irq /proc/sys /proc/sysrq-trigger
+InaccessiblePaths=-/proc/acpi -/proc/apm -/proc/asound -/proc/bus -/proc/fs -/proc/irq -/proc/sys -/proc/sysrq-trigger
 TemporaryFileSystem=/tmp /var/tmp
 
 # Network restrictions
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_UNIX
 IPAddressDeny=any
 IPAddressAllow=localhost
 IPAddressAllow=10.0.0.0/8

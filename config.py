@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Configuration management for GitHub Copilot API Proxy
-Supports multiple deployment modes: Unix socket, TLS socket, and development
+Configuration management for GitHub Copilot API Proxy + xAI Grok
+Supports multiple deployment modes + multi-backend (Copilot + Grok)
 """
 
 import os
@@ -9,8 +9,8 @@ import json
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field, validator
-from pydantic_settings import BaseSettings
+from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ServerConfig(BaseModel):
@@ -36,19 +36,25 @@ class ServerConfig(BaseModel):
     dev_port: int = 8000
     dev_reload: bool = True
 
-    @validator('mode')
+    @field_validator('mode')
+    @classmethod
     def validate_mode(cls, v):
         if v not in ['unix_socket', 'tls_socket', 'development']:
             raise ValueError('Mode must be unix_socket, tls_socket, or development')
         return v
 
-    @validator('ssl_certfile', 'ssl_keyfile')
-    def validate_ssl_files(cls, v, field, values):
-        if values.get('mode') == 'tls_socket' and not v:
-            raise ValueError(f'{field.name} is required for TLS socket mode')
-        if v and not Path(v).exists():
-            raise ValueError(f'SSL file {v} does not exist')
-        return v
+    @model_validator(mode='after')
+    def validate_ssl_files(self):
+        if self.mode == 'tls_socket':
+            if not self.ssl_certfile:
+                raise ValueError('ssl_certfile is required for TLS socket mode')
+            if not self.ssl_keyfile:
+                raise ValueError('ssl_keyfile is required for TLS socket mode')
+            if self.ssl_certfile and not Path(self.ssl_certfile).exists():
+                raise ValueError(f'SSL file {self.ssl_certfile} does not exist')
+            if self.ssl_keyfile and not Path(self.ssl_keyfile).exists():
+                raise ValueError(f'SSL file {self.ssl_keyfile} does not exist')
+        return self
 
 
 class SecurityConfig(BaseModel):
@@ -74,11 +80,18 @@ class GitHubConfig(BaseModel):
     redirect_uri: str = "https://localhost:8443/auth/callback"
     oauth_scopes: list = ["read:user"]
 
-    @validator('client_id', 'client_secret')
-    def validate_github_config(cls, v, field):
+    @field_validator('client_id', 'client_secret', mode='before')
+    @classmethod
+    def validate_github_config(cls, v, info):
         if not v:
-            logging.warning(f"GitHub {field.name} not configured - authentication will not work")
+            logging.warning(f"GitHub {info.field_name} not configured - authentication will not work")
         return v
+
+
+class XAIConfig(BaseModel):
+    """xAI Grok configuration - used when model starts with 'grok-'"""
+    api_base: str = "https://api.x.ai/v1"
+    # No client_id/secret needed - uses direct Bearer token (gsk_...)
 
 
 class LoggingConfig(BaseModel):
@@ -94,7 +107,8 @@ class LoggingConfig(BaseModel):
     log_requests: bool = True
     log_responses: bool = False
 
-    @validator('level')
+    @field_validator('level')
+    @classmethod
     def validate_log_level(cls, v):
         if v.upper() not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']:
             raise ValueError('Invalid log level')
@@ -137,8 +151,8 @@ class Settings(BaseSettings):
     """Main application settings"""
 
     # Basic settings
-    app_name: str = "GitHub Copilot API Proxy"
-    version: str = "2.0.0"
+    app_name: str = "OpenClaude Copilot Proxy + Grok"
+    version: str = "2.0.1"
     environment: str = "production"
     debug: bool = False
 
@@ -146,6 +160,7 @@ class Settings(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     github: GitHubConfig = Field(default_factory=GitHubConfig)
+    xai: XAIConfig = Field(default_factory=XAIConfig)          # <-- NEW: Grok support
     logging_config: LoggingConfig = Field(default_factory=LoggingConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
@@ -153,19 +168,13 @@ class Settings(BaseSettings):
     # Base URL for the service
     base_url: str = "https://localhost:8443"
 
-    class Config:
-        env_file = "/etc/copilot-api-proxy/config.env"
-        env_file_encoding = "utf-8"
-        env_nested_delimiter = "__"
-        case_sensitive = False
-
-        # Allow loading from multiple config files
-        env_file_hierarchy = [
-            "/etc/copilot-api-proxy/config.env",
-            "/usr/local/etc/copilot-api-proxy/config.env",
-            "./config.env",
-            ".env"
-        ]
+    model_config = SettingsConfigDict(
+        env_file="/etc/copilot-api-proxy/config.env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
 
 class ConfigManager:
@@ -178,7 +187,6 @@ class ConfigManager:
     def load_settings(self) -> Settings:
         """Load and validate settings"""
         if self._settings is None:
-            # Override config file if specified
             if self.config_file:
                 os.environ['CONFIG_FILE'] = self.config_file
 
@@ -190,15 +198,12 @@ class ConfigManager:
 
     def _post_process_settings(self):
         """Post-process settings after loading"""
-        # Generate secret key if not provided
         if not self._settings.security.secret_key:
             import secrets
             self._settings.security.secret_key = secrets.token_urlsafe(32)
 
-        # Ensure directories exist
         self._ensure_directories()
 
-        # Set up GitHub redirect URI
         if not self._settings.github.redirect_uri.startswith('http'):
             base_url = self._settings.base_url.rstrip('/')
             self._settings.github.redirect_uri = f"{base_url}/auth/callback"
@@ -224,17 +229,14 @@ class ConfigManager:
         """Validate settings for consistency"""
         settings = self._settings
 
-        # Validate server mode configuration
         if settings.server.mode == "tls_socket":
             if not settings.server.ssl_certfile or not settings.server.ssl_keyfile:
                 raise ValueError("TLS socket mode requires ssl_certfile and ssl_keyfile")
 
         elif settings.server.mode == "unix_socket":
-            # Ensure unix socket directory exists
             socket_dir = Path(settings.server.unix_socket_path).parent
             socket_dir.mkdir(parents=True, exist_ok=True)
 
-        # Validate GitHub configuration for production
         if settings.environment == "production":
             if not settings.github.client_id or not settings.github.client_secret:
                 logging.warning("GitHub App not configured - authentication will not work in production")
@@ -250,12 +252,7 @@ class ConfigManager:
         }
 
         if settings.mode == "unix_socket":
-            return {
-                **base_config,
-                "uds": settings.unix_socket_path,
-                "umask": 0o007,
-            }
-
+            return {**base_config, "uds": settings.unix_socket_path}
         elif settings.mode == "tls_socket":
             return {
                 **base_config,
@@ -266,8 +263,7 @@ class ConfigManager:
                 "ssl_ca_certs": settings.ssl_ca_certs,
                 "ssl_cert_reqs": settings.ssl_cert_reqs,
             }
-
-        else:  # development mode
+        else:  # development
             return {
                 **base_config,
                 "host": settings.dev_host,
@@ -289,7 +285,7 @@ class ConfigManager:
     def _export_env_file(self, file_path: str, settings: Settings):
         """Export configuration as environment file"""
         lines = [
-            "# GitHub Copilot API Proxy Configuration",
+            "# OpenClaude Copilot Proxy + Grok Configuration",
             "# Generated automatically - edit with care",
             "",
             f"APP_NAME={settings.app_name}",
@@ -304,10 +300,13 @@ class ConfigManager:
             f"SERVER__HOST={settings.server.host}",
             f"SERVER__PORT={settings.server.port}",
             "",
-            "# GitHub Configuration",
+            "# GitHub Configuration (for Copilot/Claude)",
             f"GITHUB__CLIENT_ID={settings.github.client_id or ''}",
             f"GITHUB__CLIENT_SECRET={settings.github.client_secret or ''}",
             f"GITHUB__REDIRECT_URI={settings.github.redirect_uri}",
+            "",
+            "# xAI Grok Configuration",
+            f"XAI__API_BASE={settings.xai.api_base}",
             "",
             "# Security Configuration",
             f"SECURITY__TOKEN_EXPIRY_HOURS={settings.security.token_expiry_hours}",
@@ -332,7 +331,7 @@ class ConfigManager:
 
     def _export_json_file(self, file_path: str, settings: Settings):
         """Export configuration as JSON file"""
-        config_dict = settings.dict()
+        config_dict = settings.model_dump()
 
         with open(file_path, 'w') as f:
             json.dump(config_dict, f, indent=2)
