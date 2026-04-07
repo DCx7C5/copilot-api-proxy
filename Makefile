@@ -1,6 +1,6 @@
 # Makefile for OpenClaude / Claude Code Copilot Proxy - Direct TLS (no Caddy)
-# Full install with `make` or `make install`
-# Sophisticated uninstall with `make uninstall`
+# Full install: `make` or `make install`
+# Sophisticated uninstall: `make uninstall`
 
 .PHONY: all certs trust clean install uninstall
 
@@ -54,7 +54,7 @@ install:
 	@mkdir -p $(INSTALL_PREFIX) $(CONFIG_DIR) $(DATA_DIR) $(LOG_DIR) /run/$(SERVICE_NAME) $(CERT_DIR)
 	@chown -R root:root $(INSTALL_PREFIX) $(CONFIG_DIR)
 	@chown $(SERVICE_NAME):$(SERVICE_NAME) $(DATA_DIR) $(LOG_DIR) /run/$(SERVICE_NAME)
-	@chmod 755 $(INSTALL_PREFIX) $(LOG_DIR)
+	@chmod 755 $(INSTALL_PREFIX) $(LOG_DIR) $(CONFIG_DIR)
 	@chmod 750 $(DATA_DIR)
 	@$(MAKE) certs
 	@cp main.py config.py requirements.txt pyproject.toml copilot-proxy-wrapper $(INSTALL_PREFIX)/ 2>/dev/null || true
@@ -69,8 +69,8 @@ install:
 	@cd $(INSTALL_PREFIX) && uv venv .venv --python python3 --clear && uv pip install -r requirements.txt --python .venv/bin/python
 	@chown -R $(SERVICE_NAME):$(SERVICE_NAME) $(INSTALL_PREFIX)/.venv
 	@cp config.env $(CONFIG_DIR)/ 2>/dev/null || true
-	@chown root:$(SERVICE_NAME) $(CONFIG_DIR)/config.env
-	@chmod 640 $(CONFIG_DIR)/config.env
+	@chown root:root $(CONFIG_DIR)/config.env
+	@chmod 644 $(CONFIG_DIR)/config.env
 	@$(MAKE) trust
 	@systemctl daemon-reload
 	@echo "✅ Full installation complete!"
@@ -79,13 +79,12 @@ install:
 uninstall:
 	@echo "⚠️  Sophisticated uninstall of OpenClaude Copilot Proxy"
 	@echo "This will remove:"
-	@echo "   • Systemd service and socket"
+	@echo "   • Systemd service"
 	@echo "   • All application files in $(INSTALL_PREFIX)"
-	@echo "   • Config in $(CONFIG_DIR)"
-	@echo "   • Certificates in $(CERT_DIR)"
+	@echo "   • Config + certificates in $(CONFIG_DIR) and $(CERT_DIR)"
 	@echo "   • User and group '$(SERVICE_NAME)'"
 	@echo ""
-	@read -p "Type 'YES' to confirm full uninstall (data in $(DATA_DIR) will be preserved): " confirm; \
+	@read -p "Type 'YES' to confirm full uninstall (data in $(DATA_DIR) and $(LOG_DIR) will be preserved): " confirm; \
 	if [ "$$confirm" != "YES" ]; then echo "Aborted."; exit 1; fi
 	@echo "Stopping and disabling service..."
 	@systemctl stop $(SERVICE_NAME) 2>/dev/null || true
@@ -97,8 +96,6 @@ uninstall:
 	@echo "Removing user and group..."
 	@userdel $(SERVICE_NAME) 2>/dev/null || true
 	@groupdel $(SERVICE_NAME) 2>/dev/null || true
-	@echo "Cleanup complete."
-	@echo ""
 	@echo "✅ Sophisticated uninstall finished."
 	@echo "Data preserved in: $(DATA_DIR) and $(LOG_DIR)"
-	@echo "Run 'sudo make clean' if you also want to remove certificates again."
+	@echo "Run 'sudo make clean' if you also want to remove certificates."
