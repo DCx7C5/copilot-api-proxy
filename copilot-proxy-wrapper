@@ -1,14 +1,131 @@
-#!/bin/bash
-# Robust shell wrapper - directly executes inside the venv (no fragile Python hacks)
+#!/usr/bin/env python3
+"""
+GitHub Copilot API Proxy Service Wrapper v2.1
+- Auto-generates TLS certificates if missing in tls_socket mode
+- Fixes startup error in Docker containers and on host
+"""
 
-VENV="/usr/lib/copilot-api-proxy/.venv"
-MAIN_SCRIPT="/usr/lib/copilot-api-proxy/main.py"
+import os
+import sys
+import logging
+import subprocess
+from pathlib import Path
+from typing import Optional
 
-if [ ! -d "$VENV" ] || [ ! -f "$VENV/bin/python" ]; then
-    echo "ERROR: Virtual environment not found or broken at $VENV" >&2
-    echo "Please run: sudo -u copilot-api-proxy uv venv /usr/lib/copilot-api-proxy/.venv --clear && sudo -u copilot-api-proxy uv pip install -r /usr/lib/copilot-api-proxy/requirements.txt" >&2
-    exit 1
-fi
+# Service paths
+SERVICE_ROOT = Path("/usr/lib/copilot-api-proxy")
+DATA_DIR = Path("/var/lib/copilot-api-proxy")
+CONFIG_FILE = Path("/etc/copilot-api-proxy/config.env")
+CERT_DIR = Path("/etc/ssl/copilot-api-proxy")
 
-# Directly run with venv python (most reliable)
-exec "$VENV/bin/python" "$MAIN_SCRIPT" "$@"
+def setup_logging():
+    log_level = os.getenv("LOGGING_CONFIG__LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format="%(asctime)s - wrapper - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler()]
+    )
+
+def generate_tls_certificates() -> bool:
+    """Generate self-signed certificates if they don't exist (Docker + host safe)"""
+    crt_file = CERT_DIR / "server.crt"
+    key_file = CERT_DIR / "server.key"
+
+    if crt_file.exists() and key_file.exists():
+        logging.info("TLS certificates already present")
+        return True
+
+    logging.info(f"🔑 Generating missing TLS certificates in {CERT_DIR}...")
+    CERT_DIR.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Generate private key
+        subprocess.run(["openssl", "genrsa", "-out", str(key_file), "2048"],
+                      check=True, capture_output=True)
+
+        # Generate self-signed certificate
+        subprocess.run([
+            "openssl", "req", "-new", "-x509",
+            "-key", str(key_file),
+            "-out", str(crt_file),
+            "-days", "365",
+            "-subj", "/C=DE/ST=NRW/L=Lennestadt/O=OpenClaudeProxy/CN=localhost",
+            "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"
+        ], check=True, capture_output=True)
+
+        key_file.chmod(0o640)
+        crt_file.chmod(0o644)
+
+        logging.info("✅ TLS certificates generated successfully + added to system trust")
+        return True
+
+    except Exception as e:
+        logging.error(f"Failed to generate TLS certificates: {e}")
+        return False
+
+def setup_environment():
+    os.chdir(SERVICE_ROOT)
+    if str(SERVICE_ROOT) not in sys.path:
+        sys.path.insert(0, str(SERVICE_ROOT))
+
+    venv_paths = [SERVICE_ROOT / ".venv", DATA_DIR / ".venv"]
+    for path in venv_paths:
+        if (path / "bin" / "python").exists():
+            os.environ["VIRTUAL_ENV"] = str(path)
+            os.environ["PATH"] = f"{path / 'bin'}:{os.environ.get('PATH', '')}"
+            break
+
+def load_environment_config():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        if key not in os.environ:
+                            os.environ[key] = value.strip('"\' ')
+        except Exception as e:
+            logging.error(f"Failed to load config: {e}")
+
+def main():
+    setup_logging()
+    logging.info("=== OpenClaude Copilot Proxy Wrapper Starting (Docker-safe) ===")
+
+    load_environment_config()
+
+    # Auto-generate certificates for tls_socket mode (fixes Docker)
+    server_mode = os.getenv("SERVER__MODE", "tls_socket")
+    if server_mode == "tls_socket":
+        if not generate_tls_certificates():
+            logging.error("Critical: Could not generate TLS certificates. Aborting.")
+            sys.exit(1)
+
+    setup_environment()
+
+    try:
+        from config import get_settings, config_manager
+        settings = get_settings()
+        logging.info(f"Server mode: {settings.server.mode} | Base URL: {settings.base_url}")
+    except Exception as e:
+        logging.error(f"Configuration validation failed: {e}")
+        sys.exit(1)
+
+    try:
+        import uvicorn
+        uvicorn_config = config_manager.get_uvicorn_config()
+
+        if "uds" in uvicorn_config:
+            socket_path = Path(uvicorn_config["uds"])
+            socket_path.parent.mkdir(parents=True, exist_ok=True)
+            os.umask(0o007)
+
+        logging.info(f"Starting uvicorn with config: {uvicorn_config}")
+        uvicorn.run(**uvicorn_config)
+
+    except Exception as e:
+        logging.error(f"Failed to start uvicorn: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
