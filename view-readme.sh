@@ -54,21 +54,21 @@ display_colored_readme() {
 
         # Section markers in brackets
         elif [[ $line =~ \[CFG\] ]]; then
-            echo "$line" | sed "s/\[CFG\]/${PURPLE}[CFG]${NC}/g"
+            echo "${line/\[CFG\]/${PURPLE}[CFG]${NC}}"
         elif [[ $line =~ \[LOCK\] ]]; then
-            echo "$line" | sed "s/\[LOCK\]/${RED}[LOCK]${NC}/g"
+            echo "${line//\[LOCK\]/${RED}[LOCK]${NC}/}"
         elif [[ $line =~ \[PERF\] ]]; then
-            echo "$line" | sed "s/\[PERF\]/${GREEN}[PERF]${NC}/g"
+            echo "${line///}" | sed "s/\[PERF\]/${GREEN}[PERF]${NC}/g"
         elif [[ $line =~ \[API\] ]]; then
-            echo "$line" | sed "s/\[API\]/${BLUE}[API]${NC}/g"
+            echo "${line///}" | sed "s/\[API\]/${BLUE}[API]${NC}/g"
         elif [[ $line =~ \[\+\] ]]; then
-            echo "$line" | sed "s/\[+\]/${GREEN}[+]${NC}/g"
+            echo "${line///}" | sed "s/\[+\]/${GREEN}[+]${NC}/g"
         elif [[ $line =~ \[\!\] ]]; then
-            echo "$line" | sed "s/\[!\]/${YELLOW}[!]${NC}/g"
+            echo "${line///}" | sed "s/\[!\]/${YELLOW}[!]${NC}/g"
         elif [[ $line =~ \[\*\] ]]; then
-            echo "$line" | sed "s/\[*\]/${CYAN}[*]${NC}/g"
+            echo "${line///}" | sed "s/\[*\]/${CYAN}[*]${NC}/g"
         elif [[ $line =~ \[\>\>\] ]]; then
-            echo "$line" | sed "s/\[>>\]/${BOLD}${GREEN}[>>]${NC}/g"
+            echo "${line///}" | sed "s/\[>>\]/${BOLD}${GREEN}[>>]${NC}/g"
 
         # Code blocks
         elif [[ $line =~ ^\`\`\` ]]; then

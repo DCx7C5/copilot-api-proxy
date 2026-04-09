@@ -1,33 +1,50 @@
 {% extends "base.html" %}
 
+{% block title %}OpenClaude Copilot Proxy{% endblock %}
+{% block header_title %}🚀 OpenClaude Copilot Proxy{% endblock %}
+{% block header_subtitle %}OpenAI-compatible interface for GitHub Copilot · xAI Grok · Anthropic Claude{% endblock %}
+
 {% block content %}
 <div class="grid">
     <div class="card">
         <h2>🚀 Service Overview</h2>
-        <p>Welcome to the GitHub Copilot API Proxy! This service provides an OpenAI-compatible API interface for GitHub Copilot, allowing you to integrate Copilot's AI capabilities into your applications.</p>
+        <p>Welcome to the <strong>OpenClaude Copilot Proxy</strong> — a production-ready TLS-encrypted proxy
+        that lets OpenClaude, Claude Code, and other agents talk to GitHub Copilot, xAI Grok, and
+        Anthropic Claude using a single OpenAI-compatible endpoint.</p>
 
         <div style="margin: 2rem 0;">
             <h3>🔑 Quick Start</h3>
-            <ol>
-                <li><strong>Get your API token:</strong> <a href="/login" class="button">Authenticate with GitHub</a></li>
-                <li><strong>Use the API:</strong> Configure your OpenAI client to use <code>{{ base_url }}/v1</code></li>
-                <li><strong>Start coding:</strong> Make requests to <code>/v1/chat/completions</code></li>
+            <ol style="margin-left: 2rem; line-height: 2.2;">
+                <li><strong>Get your token:</strong> <a href="/login" class="button" style="font-size:0.9rem; padding:8px 16px; vertical-align:middle;">Authenticate →</a></li>
+                <li><strong>Configure client:</strong> point it at <code>{{ base_url }}/v1</code></li>
+                <li><strong>Pick a model:</strong> <code>gpt-4o</code>, <code>grok-3</code>, <code>claude-sonnet-4-6</code>…</li>
             </ol>
         </div>
+
+        <a href="/login" class="button" style="margin-right:0.75rem;">🔑 Authenticate</a>
+        <a href="/v1/models" class="button secondary" target="_blank">🤖 List Models</a>
     </div>
 
     <div class="card">
         <h2>📊 Service Status</h2>
         <div style="display: flex; gap: 1rem; align-items: center; margin: 1rem 0;">
             <span class="status healthy">● Service Healthy</span>
-            <a href="/health" class="button secondary" style="font-size: 0.9rem;">View Details</a>
+            <a href="/health" class="button secondary" style="font-size: 0.85rem; padding:8px 14px;">View Details</a>
         </div>
 
+        <h3>🔗 Available Backends</h3>
+        <ul style="margin-left: 1.5rem; line-height: 2;">
+            <li>🤖 <strong>GitHub Copilot</strong> — <code>gpt-4o</code>, <code>claude-sonnet-4-*</code>, <code>o1-*</code></li>
+            <li>⚡ <strong>xAI Grok</strong> — <code>grok-3</code>, <code>grok-3-mini</code></li>
+            <li>🌐 <strong>Grok Web</strong> — <code>grok-web-3</code> (via X.com cookies)</li>
+            <li>🧠 <strong>Anthropic</strong> — <code>sk-ant-*</code> pass-through</li>
+        </ul>
+
         <h3>📈 Monitoring</h3>
-        <ul style="margin-left: 2rem;">
+        <ul style="margin-left: 1.5rem;">
             <li><a href="/dashboard">Service Dashboard</a></li>
-            <li><a href="/docs">Interactive API Documentation</a></li>
-            <li><a href="/redoc">API Reference</a></li>
+            <li><a href="/docs">Interactive API Docs (Swagger)</a></li>
+            <li><a href="/redoc">API Reference (ReDoc)</a></li>
         </ul>
     </div>
 </div>
@@ -35,80 +52,100 @@
 <div class="card">
     <h2>💻 Usage Examples</h2>
 
-    <h3>🐍 Python (OpenAI SDK)</h3>
+    <h3>🐍 Python — OpenAI SDK</h3>
     <pre><code>import openai
 
 client = openai.OpenAI(
-    api_key="your-token-from-authentication",
+    api_key="cp-...",          # token from /login
+    base_url="{{ base_url }}/v1"
+)
+
+# GitHub Copilot
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Write a Fibonacci function in Python"}]
+)
+print(response.choices[0].message.content)</code></pre>
+
+    <h3>🐍 Python — OpenClaude / Claude Code</h3>
+    <pre><code>import os
+os.environ["ANTHROPIC_BASE_URL"] = "{{ base_url }}"
+os.environ["ANTHROPIC_AUTH_TOKEN"] = "cp-..."   # token from /login
+
+# Claude Code will automatically use the proxy</code></pre>
+
+    <h3>⚡ xAI Grok</h3>
+    <pre><code>client = openai.OpenAI(
+    api_key="xai-...",         # your xAI key, or use server-configured key
     base_url="{{ base_url }}/v1"
 )
 
 response = client.chat.completions.create(
-    model="gpt-4",
-    messages=[
-        {"role": "user", "content": "Write a Python function to calculate fibonacci"}
-    ]
-)
-
-print(response.choices[0].message.content)</code></pre>
+    model="grok-3",
+    messages=[{"role": "user", "content": "Hello, Grok!"}]
+)</code></pre>
 
     <h3>🌐 cURL</h3>
-    <pre><code>curl -X POST {{ base_url }}/v1/chat/completions \
+    <pre><code>curl -sk -X POST {{ base_url }}/v1/chat/completions \
+  -H "Authorization: Bearer cp-..." \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [
-      {"role": "user", "content": "Hello, GitHub Copilot!"}
-    ]
-  }'</code></pre>
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello!"}]}'</code></pre>
 
-    <h3>🟨 JavaScript/Node.js</h3>
+    <h3>🟨 JavaScript / Node.js</h3>
     <pre><code>import OpenAI from 'openai';
 
-const openai = new OpenAI({
-    apiKey: 'your-token-from-authentication',
+const client = new OpenAI({
+    apiKey: 'cp-...',
     baseURL: '{{ base_url }}/v1'
 });
 
-const completion = await openai.chat.completions.create({
+const res = await client.chat.completions.create({
+    model: 'gpt-4o',
     messages: [{ role: 'user', content: 'Generate a React component' }],
-    model: 'gpt-4',
 });
-
-console.log(completion.choices[0].message);</code></pre>
+console.log(res.choices[0].message.content);</code></pre>
 </div>
 
 <div class="grid">
     <div class="card">
         <h2>🛡️ Security Features</h2>
-        <ul style="margin-left: 2rem;">
+        <ul style="margin-left: 1.5rem; line-height: 2.2;">
             <li>✅ OAuth2 authentication via GitHub</li>
+            <li>✅ GitHub Device Flow (no callback URL needed)</li>
+            <li>✅ Personal Access Token (PAT) auth</li>
             <li>✅ Secure token storage with encryption</li>
-            <li>✅ Rate limiting and request validation</li>
-            <li>✅ Unix domain socket communication</li>
-            <li>✅ TLS termination via reverse proxy</li>
+            <li>✅ Rate limiting and request size validation</li>
+            <li>✅ <strong>End-to-end TLS</strong> — own certificates, no Caddy</li>
             <li>✅ Systemd security hardening</li>
+            <li>✅ Automatic expired-token cleanup</li>
         </ul>
     </div>
 
     <div class="card">
-        <h2>⚙️ Configuration</h2>
-        <p>This service supports multiple deployment modes:</p>
-        <ul style="margin-left: 2rem;">
-            <li><strong>Unix Socket + Caddy:</strong> Recommended for production</li>
-            <li><strong>Direct TLS:</strong> For standalone deployments</li>
-            <li><strong>Development Mode:</strong> For local development</li>
+        <h2>⚙️ Deployment Modes</h2>
+        <ul style="margin-left: 1.5rem; line-height: 2.2;">
+            <li>🔒 <strong>Direct TLS</strong> — own cert on <code>:8443</code> (default)</li>
+            <li>🔌 <strong>Unix Socket</strong> — for integration with external proxies</li>
+            <li>🛠️ <strong>Development</strong> — HTTP on <code>:8000</code>, no TLS</li>
         </ul>
 
         <p style="margin-top: 1rem;">
-            <small>Configuration is managed via <code>/etc/copilot-api-proxy/config.env</code></small>
+            <small>Configuration: <code>/etc/copilot-api-proxy/config.env</code></small>
         </p>
+
+        <h3>🔑 Auth Methods</h3>
+        <ul style="margin-left: 1.5rem; line-height: 2.2;">
+            <li><a href="/login">GitHub OAuth</a> · <a href="/login/device">Device Flow</a> · PAT</li>
+            <li>Twitter/X.com Bearer Token</li>
+            <li>xAI / Grok API Key</li>
+            <li>Grok Web (X.com cookies)</li>
+        </ul>
     </div>
 </div>
 
 <div class="alert info">
-    <strong>💡 Need Help?</strong>
-    Check the <a href="/docs">API Documentation</a> for detailed information about endpoints, authentication, and usage examples.
+    <strong>💡 Tip:</strong>
+    Use the <a href="/v1/models">models endpoint</a> to see all available models.
+    Check the <a href="/docs">API Documentation</a> for full endpoint reference and examples.
 </div>
 {% endblock %}

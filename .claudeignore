@@ -1,0 +1,17 @@
+AGENTS.md
+
+# Virtual environment – 95 MB, never relevant as context
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build & dist artifacts
+dist/
+build/
+*.egg-info/
+
+# Logs & runtime data
+*.log
+/var/log/

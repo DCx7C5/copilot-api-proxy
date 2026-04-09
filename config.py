@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Configuration management for GitHub Copilot API Proxy + xAI Grok
-Supports multiple deployment modes + multi-backend (Copilot + Grok)
+Configuration management for GitHub Copilot API Proxy and xAI Grok
+Supports multiple deployment modes and multi-backend (Copilot and Grok)
 """
 
 import os
@@ -50,10 +50,7 @@ class ServerConfig(BaseModel):
                 raise ValueError('ssl_certfile is required for TLS socket mode')
             if not self.ssl_keyfile:
                 raise ValueError('ssl_keyfile is required for TLS socket mode')
-            if self.ssl_certfile and not Path(self.ssl_certfile).exists():
-                raise ValueError(f'SSL file {self.ssl_certfile} does not exist')
-            if self.ssl_keyfile and not Path(self.ssl_keyfile).exists():
-                raise ValueError(f'SSL file {self.ssl_keyfile} does not exist')
+            # Note: file existence is checked at startup after cert generation
         return self
 
 
@@ -69,7 +66,7 @@ class SecurityConfig(BaseModel):
 
     # Request limits
     max_request_size: int = 10 * 1024 * 1024  # 10MB
-    max_tokens_per_request: int = 4096
+    max_tokens_per_request: int = 200000
     request_timeout: int = 300  # 5 minutes
 
 
@@ -89,9 +86,33 @@ class GitHubConfig(BaseModel):
 
 
 class XAIConfig(BaseModel):
-    """xAI Grok configuration - used when model starts with 'grok-'"""
+    """xAI Grok configuration - used when the model starts with 'grok-'"""
     api_base: str = "https://api.x.ai/v1"
-    # No client_id/secret needed - uses direct Bearer token (gsk_...)
+    api_key: Optional[str] = None          # server-side xAI key (xai-… or gsk_…)
+
+
+class BrowserConfig(BaseModel):
+    """
+    Browser impersonation settings used for all requests to X.com, grok.x.com,
+    and grok.com.  Setting a real browser UA (and optionally a full X.com cookie
+    string) makes outbound requests indistinguishable from a normal browser session.
+    """
+    user_agent: str = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
+    # Optional: full Cookie string injected into every api.twitter.com /
+    # grok.x.com request (helps pass bot-detection checks).
+    # Example: "auth_token=xxx; ct0=yyy; _twitter_sess=zzz; guest_id=aaa"
+    x_com_cookies: Optional[str] = None
+
+
+class TwitterConfig(BaseModel):
+    """Twitter/X.com OAuth 1.0a application credentials"""
+    consumer_key: Optional[str] = None     # API Key from developer.twitter.com
+    consumer_secret: Optional[str] = None  # API Key Secret
+    callback_uri: str = "https://localhost:8443/auth/twitter/callback"
+    bearer_token: Optional[str] = None     # App-only / OAuth 2.0 Bearer token
 
 
 class LoggingConfig(BaseModel):
@@ -160,7 +181,9 @@ class Settings(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     github: GitHubConfig = Field(default_factory=GitHubConfig)
-    xai: XAIConfig = Field(default_factory=XAIConfig)          # <-- NEW: Grok support
+    xai: XAIConfig = Field(default_factory=XAIConfig)
+    browser: BrowserConfig = Field(default_factory=BrowserConfig)
+    twitter: TwitterConfig = Field(default_factory=TwitterConfig)
     logging_config: LoggingConfig = Field(default_factory=LoggingConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
@@ -254,15 +277,18 @@ class ConfigManager:
         if settings.mode == "unix_socket":
             return {**base_config, "uds": settings.unix_socket_path}
         elif settings.mode == "tls_socket":
-            return {
+            tls_config = {
                 **base_config,
                 "host": settings.host,
                 "port": settings.port,
                 "ssl_keyfile": settings.ssl_keyfile,
                 "ssl_certfile": settings.ssl_certfile,
-                "ssl_ca_certs": settings.ssl_ca_certs,
-                "ssl_cert_reqs": settings.ssl_cert_reqs,
             }
+            if settings.ssl_ca_certs:
+                tls_config["ssl_ca_certs"] = settings.ssl_ca_certs
+            if settings.ssl_cert_reqs:
+                tls_config["ssl_cert_reqs"] = settings.ssl_cert_reqs
+            return tls_config
         else:  # development
             return {
                 **base_config,
@@ -307,6 +333,12 @@ class ConfigManager:
             "",
             "# xAI Grok Configuration",
             f"XAI__API_BASE={settings.xai.api_base}",
+            f"XAI__API_KEY={settings.xai.api_key or ''}",
+            "",
+            "# Twitter / X.com OAuth 1.0a Application Credentials",
+            f"TWITTER__CONSUMER_KEY={settings.twitter.consumer_key or ''}",
+            f"TWITTER__CONSUMER_SECRET={settings.twitter.consumer_secret or ''}",
+            f"TWITTER__CALLBACK_URI={settings.twitter.callback_uri}",
             "",
             "# Security Configuration",
             f"SECURITY__TOKEN_EXPIRY_HOURS={settings.security.token_expiry_hours}",
@@ -330,7 +362,7 @@ class ConfigManager:
             f.write('\n'.join(lines))
 
     def _export_json_file(self, file_path: str, settings: Settings):
-        """Export configuration as JSON file"""
+        """Export configuration as a JSON file"""
         config_dict = settings.model_dump()
 
         with open(file_path, 'w') as f:

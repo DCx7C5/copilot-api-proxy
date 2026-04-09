@@ -19,6 +19,13 @@ jobs:
       version_type: ${{ steps.semver.outputs.release_type }}
       current_version: ${{ steps.semver.outputs.current_version }}
     steps:
+      - name: GitHub App Token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.DYSTOPIANBOT_APP_ID }}
+          private-key: ${{ secrets.DYSTOPIANBOT_KEY }}
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -28,7 +35,7 @@ jobs:
         id: semver
         uses: ietf-tools/semver-action@v1
         with:
-          token: ${{ github.token }}
+          token: ${{ steps.app_token.outputs.token }}
           branch: ${{ github.ref_name }}
           noVersionBumpBehavior: 'current'
           skipInvalidTags: true
@@ -39,7 +46,7 @@ jobs:
     if: needs.version-analysis.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     outputs:
-      release_id: ${{ steps.create_release.outputs.id }}
+      release_id: ${{ steps.create_release.outputs.release_id }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Checkout code
@@ -51,7 +58,7 @@ jobs:
         id: changelog
         uses: requarks/changelog-action@v1
         with:
-          token: ${{ github.token }}
+          token: ${{ steps.app_token.outputs.token }}
           fromTag: ${{ needs.version-analysis.outputs.current_version }}
           toTag: ${{ github.ref }}
           writeToFile: false
@@ -70,13 +77,26 @@ jobs:
             sed -i "s/version=\".*\"/version=\"$NEW_VERSION\"/" main.py
           fi
 
-      - name: Commit version update
+      - name: Configure git identity
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add .
-          git commit -m "chore: bump version to v${{ needs.version-analysis.outputs.next_version }}" || exit 0
-          git push
+
+      - name: Stage version changes
+        uses: DCx7C5/actions/git-stage-changes@v1
+        with:
+          include-untracked: "false"
+
+      - name: Commit version update
+        uses: DCx7C5/actions/git-commit@v1
+        with:
+          message: "chore: bump version to v${{ needs.version-analysis.outputs.next_version }}"
+          skip-if-no-changes: "true"
+
+      - name: Push version bump
+        uses: DCx7C5/actions/git-push-changes@v1
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Git tag
         run: |
@@ -142,29 +162,37 @@ jobs:
           - Full changelog: https://github.com/${{ github.repository }}/compare/${{ needs.version-analysis.outputs.current_version }}...v${{ needs.version-analysis.outputs.next_version }}
           EOF
 
+      - name: Read release notes
+        id: read_notes
+        run: |
+          {
+            echo "notes<<NOTES_DELIMITER"
+            cat release_notes.md
+            echo "NOTES_DELIMITER"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: DCx7C5/actions/gh-create-release@v1
         with:
-          tag_name: "v${{ needs.version-analysis.outputs.next_version }}"
-          release_name: "Release v${{ needs.version-analysis.outputs.next_version }}"
-          body_path: release_notes.md
-          draft: false
-          prerelease: false
+          release-tag: "v${{ needs.version-analysis.outputs.next_version }}"
+          release-name: "Release v${{ needs.version-analysis.outputs.next_version }}"
+          release-body: ${{ steps.read_notes.outputs.notes }}
+          draft: "false"
+          prerelease: "false"
+          fail-if-exists: "false"
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
   # Job 3: Build and upload release assets
   build-assets:
     needs: [version-analysis, create-release]
     if: needs.version-analysis.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        format: [tarball, deb, rpm]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: DCx7C5/actions/git-checkout@v1
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -174,44 +202,29 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential fakeroot devscripts
-
-          # Install uv for fast Python dependency management
+          sudo apt-get install -y build-essential fakeroot devscripts rpm
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Create source distribution
+      - name: Create source tarball
         run: |
           VERSION="${{ needs.version-analysis.outputs.next_version }}"
           PACKAGE_DIR="copilot-api-proxy-${VERSION}"
-
-          # Create package directory
           mkdir -p "$PACKAGE_DIR"
-
-          # Copy source files
           cp -r main.py config.py requirements.txt templates/ "$PACKAGE_DIR/"
           cp copilot-proxy-wrapper install.sh security-audit.sh "$PACKAGE_DIR/"
-          cp *.service *.socket Caddyfile config.env "$PACKAGE_DIR/"
+          cp *.service *.socket config.env "$PACKAGE_DIR/"
           cp README.md "$PACKAGE_DIR/"
-
-          # Create version file
           echo "$VERSION" > "$PACKAGE_DIR/VERSION"
-
-          # Create tarball
           tar -czf "copilot-api-proxy-${VERSION}.tar.gz" "$PACKAGE_DIR"
 
       - name: Build DEB package
-        if: matrix.format == 'deb'
         run: |
           VERSION="${{ needs.version-analysis.outputs.next_version }}"
-
-          # Create debian package structure
           mkdir -p debian-build/copilot-api-proxy-${VERSION}/DEBIAN
           mkdir -p debian-build/copilot-api-proxy-${VERSION}/usr/{bin,lib/copilot-api-proxy}
           mkdir -p debian-build/copilot-api-proxy-${VERSION}/etc/{copilot-api-proxy,systemd/system}
           mkdir -p debian-build/copilot-api-proxy-${VERSION}/var/{lib,log}/copilot-api-proxy
-
-          # Copy files
           cp -r main.py config.py requirements.txt templates/ \
                 debian-build/copilot-api-proxy-${VERSION}/usr/lib/copilot-api-proxy/
           cp copilot-proxy-wrapper \
@@ -220,8 +233,6 @@ jobs:
                 debian-build/copilot-api-proxy-${VERSION}/etc/copilot-api-proxy/
           cp *.service *.socket \
                 debian-build/copilot-api-proxy-${VERSION}/etc/systemd/system/
-
-          # Create control file
           cat > debian-build/copilot-api-proxy-${VERSION}/DEBIAN/control << EOF
           Package: copilot-api-proxy
           Version: ${VERSION}
@@ -234,109 +245,65 @@ jobs:
            A FastAPI-based proxy that provides OpenAI-compatible API endpoints for
            GitHub Copilot with enterprise-level security and monitoring.
           EOF
-
-          # Create postinst script
           cat > debian-build/copilot-api-proxy-${VERSION}/DEBIAN/postinst << 'EOF'
           #!/bin/bash
           set -e
-
-          # Create user
           if ! id copilot-api-proxy >/dev/null 2>&1; then
               useradd -r -s /usr/sbin/nologin -d /var/lib/copilot-api-proxy copilot-api-proxy
           fi
-
-          # Set permissions
           chown -R copilot-api-proxy:copilot-api-proxy /var/lib/copilot-api-proxy
           chown -R copilot-api-proxy:copilot-api-proxy /var/log/copilot-api-proxy
           chmod 750 /var/lib/copilot-api-proxy
-
-          # Install Python dependencies
-          cd /usr/lib/copilot-api-proxy
-          python3 -m pip install -r requirements.txt
-
-          # Enable services
-          systemctl daemon-reload
-          systemctl enable copilot-api-proxy.socket
-
+          cd /usr/lib/copilot-api-proxy && python3 -m pip install -r requirements.txt
+          systemctl daemon-reload && systemctl enable copilot-api-proxy.socket
           echo "Installation complete! Configure /etc/copilot-api-proxy/config.env and start the service."
           EOF
-
           chmod +x debian-build/copilot-api-proxy-${VERSION}/DEBIAN/postinst
-
-          # Build package
           dpkg-deb --build debian-build/copilot-api-proxy-${VERSION}
           mv debian-build/copilot-api-proxy-${VERSION}.deb copilot-api-proxy_${VERSION}_all.deb
 
       - name: Build RPM package
-        if: matrix.format == 'rpm'
         run: |
-          sudo apt-get install -y rpm
-
           VERSION="${{ needs.version-analysis.outputs.next_version }}"
-
-          # Create RPM build structure
           mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-
-          # Create source tarball for RPM
           tar -czf rpmbuild/SOURCES/copilot-api-proxy-${VERSION}.tar.gz \
                    main.py config.py requirements.txt templates/ \
                    copilot-proxy-wrapper install.sh security-audit.sh \
-                   *.service *.socket Caddyfile config.env README.md
-
-          # Create spec file
+                   *.service *.socket config.env README.md
           cat > rpmbuild/SPECS/copilot-api-proxy.spec << EOF
           Name:           copilot-api-proxy
           Version:        ${VERSION}
           Release:        1%{?dist}
           Summary:        Production-ready GitHub Copilot API proxy
-
           License:        MIT
           URL:            https://github.com/${{ github.repository }}
           Source0:        %{name}-%{version}.tar.gz
-
           BuildArch:      noarch
           Requires:       python3 >= 3.9, python3-pip, systemd
-
           %description
           A FastAPI-based proxy that provides OpenAI-compatible API endpoints for
           GitHub Copilot with enterprise-level security and monitoring.
-
           %prep
           %setup -q -n %{name}-%{version}
-
           %build
-          # Nothing to build
-
           %install
           rm -rf \$RPM_BUILD_ROOT
           mkdir -p \$RPM_BUILD_ROOT/usr/{bin,lib/copilot-api-proxy}
           mkdir -p \$RPM_BUILD_ROOT/etc/{copilot-api-proxy,systemd/system}
           mkdir -p \$RPM_BUILD_ROOT/var/{lib,log}/copilot-api-proxy
-
-          cp -r main.py config.py requirements.txt templates/ \
-                \$RPM_BUILD_ROOT/usr/lib/copilot-api-proxy/
-          cp copilot-proxy-wrapper \
-                \$RPM_BUILD_ROOT/usr/bin/copilot-api-proxy
-          cp config.env \
-                \$RPM_BUILD_ROOT/etc/copilot-api-proxy/
-          cp *.service *.socket \
-                \$RPM_BUILD_ROOT/etc/systemd/system/
-
+          cp -r main.py config.py requirements.txt templates/ \$RPM_BUILD_ROOT/usr/lib/copilot-api-proxy/
+          cp copilot-proxy-wrapper \$RPM_BUILD_ROOT/usr/bin/copilot-api-proxy
+          cp config.env \$RPM_BUILD_ROOT/etc/copilot-api-proxy/
+          cp *.service *.socket \$RPM_BUILD_ROOT/etc/systemd/system/
           %post
           if ! id copilot-api-proxy >/dev/null 2>&1; then
               useradd -r -s /sbin/nologin -d /var/lib/copilot-api-proxy copilot-api-proxy
           fi
-
           chown -R copilot-api-proxy:copilot-api-proxy /var/lib/copilot-api-proxy
           chown -R copilot-api-proxy:copilot-api-proxy /var/log/copilot-api-proxy
           chmod 750 /var/lib/copilot-api-proxy
-
-          cd /usr/lib/copilot-api-proxy
-          python3 -m pip install -r requirements.txt
-
-          systemctl daemon-reload
-          systemctl enable copilot-api-proxy.socket
-
+          cd /usr/lib/copilot-api-proxy && python3 -m pip install -r requirements.txt
+          systemctl daemon-reload && systemctl enable copilot-api-proxy.socket
           %files
           /usr/bin/copilot-api-proxy
           /usr/lib/copilot-api-proxy/
@@ -345,50 +312,22 @@ jobs:
           /etc/systemd/system/copilot-api-proxy.socket
           %attr(750,copilot-api-proxy,copilot-api-proxy) /var/lib/copilot-api-proxy
           %attr(755,copilot-api-proxy,copilot-api-proxy) /var/log/copilot-api-proxy
-
           %changelog
           * $(date '+%a %b %d %Y') GitHub Actions <action@github.com> - ${VERSION}-1
           - Automated build for version ${VERSION}
           EOF
-
-          # Build RPM
           rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/copilot-api-proxy.spec
-
-          # Find and rename the built RPM
           find rpmbuild/RPMS -name "*.rpm" -exec cp {} copilot-api-proxy-${VERSION}-1.noarch.rpm \;
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload all release assets
+        uses: DCx7C5/actions/gh-upload-assets@v1
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}.tar.gz
-          asset_name: copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}.tar.gz
-          asset_content_type: application/gzip
-        if: matrix.format == 'tarball'
-
-      - name: Upload DEB Package
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: copilot-api-proxy_${{ needs.version-analysis.outputs.next_version }}_all.deb
-          asset_name: copilot-api-proxy_${{ needs.version-analysis.outputs.next_version }}_all.deb
-          asset_content_type: application/vnd.debian.binary-package
-        if: matrix.format == 'deb'
-
-      - name: Upload RPM Package
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}-1.noarch.rpm
-          asset_name: copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}-1.noarch.rpm
-          asset_content_type: application/x-rpm
-        if: matrix.format == 'rpm'
+          release-tag: "v${{ needs.version-analysis.outputs.next_version }}"
+          assets: |
+            copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}.tar.gz
+            copilot-api-proxy_${{ needs.version-analysis.outputs.next_version }}_all.deb
+            copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}-1.noarch.rpm
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
   # Job 4: Build Docker image
   build-docker:
@@ -397,17 +336,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: DCx7C5/actions/git-checkout@v1
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Dockerfile
         run: |
@@ -470,17 +404,28 @@ jobs:
           CMD ["/app/.venv/bin/python", "main.py"]
           EOF
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t copilot-api-proxy:${{ needs.version-analysis.outputs.next_version }} \
+            -t copilot-api-proxy:latest \
+            .
+
+      - name: Push versioned Docker image to GHCR
+        uses: DCx7C5/actions/docker-push-image@v1
         with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.version-analysis.outputs.next_version }}
-            ghcr.io/${{ github.repository }}:latest
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          image-tag: copilot-api-proxy
+          image-version: ${{ needs.version-analysis.outputs.next_version }}
+          registry: ghcr.io
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push latest Docker image to GHCR
+        uses: DCx7C5/actions/docker-push-image@v1
+        with:
+          image-tag: copilot-api-proxy
+          image-version: latest
+          registry: ghcr.io
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
   # Job 5: Update package repository (for PKGBUILD)
   update-pkgbuild:
@@ -489,11 +434,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PKGBUILD repository
-        uses: actions/checkout@v4
+        uses: DCx7C5/actions/git-checkout@v1
         with:
           repository: ${{ github.repository_owner }}/Dystopian-PKGBUILDS
           path: pkgbuild-repo
-          token: ${{ secrets.GITHUB_TOKEN }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update PKGBUILD
         run: |
@@ -514,8 +459,7 @@ jobs:
           depends=('python>=3.9' 'systemd')
           makedepends=('python-pip')
           optdepends=(
-              'caddy: recommended reverse proxy with automatic TLS'
-              'nginx: alternative reverse proxy'
+              'nginx: optional reverse proxy'
           )
           backup=('etc/copilot-api-proxy/config.env')
           source=("https://github.com/${{ github.repository }}/releases/download/v\${pkgver}/copilot-api-proxy-\${pkgver}.tar.gz")
@@ -554,29 +498,13 @@ jobs:
           git config --local user.name "GitHub Action"
           git add copilot-api-proxy/PKGBUILD copilot-api-proxy/.SRCINFO
           git commit -m "copilot-api-proxy: update to v${{ needs.version-analysis.outputs.next_version }}" || exit 0
-          git push
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository_owner }}/Dystopian-PKGBUILDS.git"
 
-  # Job 6: Notify about release
-  notify-release:
-    needs: [version-analysis, create-release, build-assets, build-docker, update-pkgbuild]
-    if: needs.version-analysis.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create summary
-        run: |
-          echo "## 🎉 Release v${{ needs.version-analysis.outputs.next_version }} Published!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Available Packages:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Source**: [copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}.tar.gz](https://github.com/${{ github.repository }}/releases/download/v${{ needs.version-analysis.outputs.next_version }}/copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}.tar.gz)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Debian**: [copilot-api-proxy_${{ needs.version-analysis.outputs.next_version }}_all.deb](https://github.com/${{ github.repository }}/releases/download/v${{ needs.version-analysis.outputs.next_version }}/copilot-api-proxy_${{ needs.version-analysis.outputs.next_version }}_all.deb)" >> $GITHUB_STEP_SUMMARY
-          echo "- **RPM**: [copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}-1.noarch.rpm](https://github.com/${{ github.repository }}/releases/download/v${{ needs.version-analysis.outputs.next_version }}/copilot-api-proxy-${{ needs.version-analysis.outputs.next_version }}-1.noarch.rpm)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker**: \`ghcr.io/${{ github.repository }}:${{ needs.version-analysis.outputs.next_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Arch Linux**: Available in Dystopian-PKGBUILDS" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🚀 Quick Install:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📋 Changes:" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.changelog.outputs.changes }}" | head -20 >> $GITHUB_STEP_SUMMARY
+      - name: Telegram Release Notification
+        uses: DCx7C5/actions/tg-notify-release@v1
+        with:
+          tg-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          release-name: "v${{ needs.version-analysis.outputs.next_version }}"
+          tag-name: "v${{ needs.version-analysis.outputs.next_version }}"
+

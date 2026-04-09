@@ -1,46 +1,42 @@
 [Unit]
 Description=GitHub Copilot API Proxy Socket v2.0
 Documentation=https://github.com/dcx7c5/copilot-api-proxy
-PartOf=copilot-api-proxy.service
-Before=copilot-api-proxy.service
+# NOTE: This socket unit is only used when SERVER__MODE=unix_socket.
+#       In tls_socket mode (default) the service binds directly to TCP 8443
+#       and this unit must remain DISABLED.
+#
+#       To switch to unix_socket mode:
+#         1. Set SERVER__MODE=unix_socket in /etc/copilot-api-proxy/config.env
+#         2. sudo systemctl enable --now copilot-api-proxy.socket
+#         3. sudo systemctl disable copilot-api-proxy.service  (service started by socket)
 
 [Socket]
-# Socket configuration
+# Unix-domain socket for unix_socket mode
 ListenStream=/run/copilot-api-proxy/copilot-proxy.sock
 SocketUser=copilot-api-proxy
-SocketGroup=caddy
+SocketGroup=copilot-api-proxy
 SocketMode=0660
-
-# Directory permissions
 DirectoryMode=0755
 
-# Socket tuning for production
+# Socket tuning
 Backlog=256
 KeepAlive=yes
 KeepAliveTimeSec=30
 KeepAliveIntervalSec=5
 KeepAliveProbes=3
-
-# Rate limiting to prevent abuse
-TriggerLimitIntervalSec=5s
-TriggerLimitBurst=50
-
-# Connection limits
 MaxConnections=100
 MaxConnectionsPerSource=10
-
-# Performance optimizations
 ReceiveBuffer=65535
 SendBuffer=65535
-IPTOS=throughput
 
-# IPv6 support (if needed)
-# BindIPv6Only=ipv6-only
+# Avoid hammering a crashing service
+TriggerLimitIntervalSec=30s
+TriggerLimitBurst=5
 
-# Security
+# Cleanup
 RemoveOnStop=yes
-Symlinks=no
 FreeBind=no
 
 [Install]
-WantedBy=sockets.target
+# Do NOT add WantedBy=sockets.target here — enable manually only when
+# unix_socket mode is configured.

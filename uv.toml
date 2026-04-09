@@ -1,10 +1,5 @@
-[project]
-name = "copilot-api-proxy"
-version = "2.0.1"
-requires-python = ">=3.11"
-dependencies = []
+# uv-specific configuration
+# project metadata and dependencies belong in pyproject.toml
 
-
-[tool.uv]
-dev-dependencies = []
-package = true
+[pip]
+index-url = "https://pypi.org/simple"

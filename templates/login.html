@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+{% block title %}Login – OpenClaude Copilot Proxy{% endblock %}
+{% block header_title %}🔑 Authenticate{% endblock %}
+{% block header_subtitle %}Choose your authentication method{% endblock %}
+
+{% block extra_head %}
+<style>
+  .login-input {
+    width: 100%; padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    background: var(--bg);
+    color: var(--text);
+    transition: border-color 0.2s;
+  }
+  .login-input:focus { outline: none; border-color: var(--primary); }
+  .method-badge {
+    font-size: 0.72rem; padding: 2px 8px; border-radius: 12px;
+    vertical-align: middle; font-weight: 600; margin-left: 0.4rem;
+  }
+  .badge-green  { background: #d4edda; color: #155724; }
+  .badge-blue   { background: #e8f4fd; color: #0c5460; }
+  .badge-yellow { background: #fff3cd; color: #856404; }
+  .badge-purple { background: #ede7f6; color: #4a148c; }
+  .card-muted   { color: var(--text-muted); margin-bottom: 0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 620px; margin: 0 auto;">
+
+  <!-- ── X.com OAuth 1.0a ── -->
+  <div class="card">
+    <h2>🐦 X.com OAuth<span class="method-badge badge-blue"> 1.0a</span></h2>
+    <p class="card-muted">
+      Sign in with your X.com account using the official OAuth 1.0a flow — no tokens to copy.
+      Requires <code>TWITTER__CONSUMER_KEY</code> and <code>TWITTER__CONSUMER_SECRET</code>
+      in <code>config.env</code>.<br>
+      <small>
+        Register your app at
+        <a href="https://developer.twitter.com/en/portal/projects-and-apps" target="_blank">developer.twitter.com</a>
+        and set the callback URL to <code>{{ base_url }}/auth/twitter/callback</code>.
+      </small>
+    </p>
+    {% if twitter_configured %}
+    <a href="/login/twitter" class="button"
+       style="display:block; text-align:center; font-size:1.05rem; padding:14px; background:#1da1f2;">
+      🐦 Sign in with X.com →
+    </a>
+    {% else %}
+    <div class="alert warning">
+      ⚠️ X.com OAuth not configured. Set <code>TWITTER__CONSUMER_KEY</code> and
+      <code>TWITTER__CONSUMER_SECRET</code> in
+      <code>/etc/copilot-api-proxy/config.env</code>, then restart the service.
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── GitHub OAuth ── -->
+  <div class="card">
+    <h2>🌐 GitHub OAuth <span class="method-badge badge-blue">Web Flow</span></h2>
+    <p class="card-muted">Standard OAuth flow. Requires a configured GitHub App with a callback URL.</p>
+    {% if login_url %}
+    <a href="{{ login_url }}" class="button" style="display:block; text-align:center; font-size:1.05rem; padding:14px;">
+      Continue with GitHub →
+    </a>
+    {% else %}
+    <div class="alert warning">
+      ⚠️ GitHub App not configured. Set <code>GITHUB__CLIENT_ID</code> in
+      <code>/etc/copilot-api-proxy/config.env</code>.
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Device Flow ── -->
+  <div class="card">
+    <h2>📱 Device Flow <span class="method-badge badge-green">No port needed</span></h2>
+    <p class="card-muted">No open ports or callback URL required. Visit a short GitHub URL in any browser and enter a code — works from headless servers too.</p>
+    <a href="/login/device" class="button success" style="display:block; text-align:center; font-size:1.05rem; padding:14px;">
+      Start Device Flow →
+    </a>
+  </div>
+
+  <!-- ── PAT ── -->
+  <div class="card">
+    <h2>🗝️ Personal Access Token <span class="method-badge badge-green">Instant</span></h2>
+    <p class="card-muted">
+      Paste a GitHub PAT — no App or callback needed.
+      Create one at <a href="https://github.com/settings/tokens/new?scopes=read:user" target="_blank">github.com/settings/tokens</a>
+      with scope <code>read:user</code>.
+    </p>
+    <form action="/login/pat/form" method="post" style="margin-top:1.2rem;">
+      <label for="github_token" style="display:none;">GitHub Personal Access Token</label>
+      <input type="password" id="github_token" name="github_token"
+             placeholder="ghp_…" class="login-input">
+      <button type="submit" class="button" style="width:100%; font-size:1.05rem; padding:14px;">
+        Submit PAT →
+      </button>
+    </form>
+  </div>
+
+  <!-- ── Twitter / X.com Bearer Token ── -->
+  <div class="card">
+    <h2>🐦 X.com Bearer Token <span class="method-badge badge-blue">OAuth 2.0</span></h2>
+    <p class="card-muted">
+      Paste a Twitter/X.com Bearer token, or leave empty to use the server-configured
+      <code>TWITTER__BEARER_TOKEN</code>.
+      Get yours in the <a href="https://developer.twitter.com/en/portal/projects-and-apps" target="_blank">Twitter Developer Portal</a>
+      under <em>Keys and tokens → Bearer Token</em>.
+    </p>
+    <form id="twitter-bearer-form" style="margin-top:1.2rem;">
+      <label for="twitter-bearer-input" style="display:none;">Twitter/X.com Bearer Token</label>
+      <input type="password" id="twitter-bearer-input"
+             placeholder="AAAAAAAAAA… (leave empty for server token)"
+             class="login-input">
+      <button type="submit" class="button" id="twitter-bearer-btn"
+              style="width:100%; font-size:1.05rem; padding:14px; background:#1da1f2;">
+        🐦 Sign in with X.com Bearer →
+      </button>
+    </form>
+  </div>
+
+  <!-- ── xAI / Grok API Key ── -->
+  <div class="card">
+    <h2>🤖 xAI / Grok API Key <span class="method-badge badge-yellow">Direct</span></h2>
+    <p class="card-muted">
+      Paste your xAI API key (<code>xai-…</code> or <code>gsk_…</code>) to use Grok models directly.
+      Get yours at <a href="https://console.x.ai" target="_blank">console.x.ai</a>.
+    </p>
+    <form id="xai-form" style="margin-top:1.2rem;">
+      <label for="xai-key-input" style="display:none;">xAI API Key</label>
+      <input type="password" id="xai-key-input" placeholder="xai-…" class="login-input">
+      <button type="submit" id="xai-btn" class="button"
+              style="width:100%; font-size:1.05rem; padding:14px; background:#ff6600;">
+        🤖 Use xAI Key Directly →
+      </button>
+    </form>
+  </div>
+
+  <!-- ── Grok Web (X.com cookies) ── -->
+  <div class="card">
+    <h2>🌐 Grok Web <span class="method-badge badge-purple">X.com cookies</span></h2>
+    <p class="card-muted">
+      Use the unofficial <strong>grok.x.com</strong> backend with your X.com browser cookies —
+      requires an active <strong>Grok Pro / SuperGrok</strong> subscription.<br>
+      <small>How to get cookies: x.com → DevTools → Application → Cookies → https://x.com</small>
+    </p>
+    <div class="alert warning" style="margin-bottom:1rem;">
+      ⚠️ Unofficial API — may break and may violate xAI/X ToS if used heavily.
+      Models: <code>grok-web</code>, <code>grok-web-3</code>, <code>grok-web-3-mini</code>
+    </div>
+    <form id="grok-web-form" style="margin-top:1rem;">
+      <label for="grok-auth-token">auth_token cookie</label>
+      <input type="password" id="grok-auth-token" placeholder="auth_token value from x.com cookies"
+             class="login-input" style="margin-top:0.3rem;">
+      <label for="grok-ct0">ct0 cookie</label>
+      <input type="text" id="grok-ct0" placeholder="ct0 value from x.com cookies"
+             class="login-input" style="margin-top:0.3rem;">
+      <label for="grok-web-full-cookie">
+        Full X.com Cookie header
+        <span style="opacity:0.65; font-size:0.85rem;">(optional — overrides the minimal auth_token+ct0 cookie)</span>
+      </label>
+      <input type="password" id="grok-web-full-cookie"
+             placeholder="Paste entire Cookie: header from x.com DevTools → Network → any request"
+             class="login-input" style="margin-top:0.3rem;">
+      <label for="grok-web-ua">
+        User-Agent
+        <span style="opacity:0.65; font-size:0.85rem;">(optional — overrides BROWSER__USER_AGENT for this session)</span>
+      </label>
+      <input type="text" id="grok-web-ua"
+             placeholder="Mozilla/5.0 … (copy from DevTools → Network → User-Agent header)"
+             class="login-input" style="margin-top:0.3rem;">
+      <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; font-size:0.9rem; color:var(--text-muted); cursor:pointer;">
+        <input type="checkbox" id="grok-skip-validation" style="width:auto; margin:0;">
+        Skip live cookie validation (register without probing grok.x.com)
+      </label>
+      <div id="grok-web-error" class="alert error" style="display:none; margin-bottom:0.75rem;"></div>
+      <button type="submit" id="grok-web-btn" class="button"
+              style="width:100%; font-size:1.05rem; padding:14px; background:#7c4dff;">
+        🌐 Register Grok Web Cookies →
+      </button>
+    </form>
+  </div>
+
+  <!-- ── Grok.com (xAI website cookies) ── -->
+  <div class="card">
+    <h2>🤖 Grok.com <span class="method-badge badge-purple">grok.com cookies</span></h2>
+    <p class="card-muted">
+      Use the unofficial <strong>grok.com</strong> backend with your xAI browser session —
+      no API budget consumed.<br>
+      <small>
+        How to get the cookie: log in at <a href="https://grok.com" target="_blank">grok.com</a> →
+        DevTools → Network tab → any request → Headers → copy the full <strong>Cookie</strong> header value.
+      </small>
+    </p>
+    <div class="alert warning" style="margin-bottom:1rem;">
+      ⚠️ Unofficial API — may break and may violate xAI ToS if used heavily.
+      Models: <code>grok-com</code>, <code>grok-com-3</code>, <code>grok-com-3-mini</code>
+    </div>
+    <form id="grok-com-form" style="margin-top:1rem;">
+      <label for="grok-com-cookie">Cookie header value</label>
+      <input type="password" id="grok-com-cookie"
+             placeholder="Paste the full Cookie: header value from grok.com DevTools"
+             class="login-input" style="margin-top:0.3rem;">
+      <label for="grok-com-ua">
+        User-Agent
+        <span style="opacity:0.65; font-size:0.85rem;">(optional — overrides BROWSER__USER_AGENT for this session)</span>
+      </label>
+      <input type="text" id="grok-com-ua"
+             placeholder="Mozilla/5.0 … (copy from DevTools → Network → User-Agent header)"
+             class="login-input" style="margin-top:0.3rem;">
+      <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem; font-size:0.9rem; color:var(--text-muted); cursor:pointer;">
+        <input type="checkbox" id="grok-com-skip-validation" style="width:auto; margin:0;">
+        Skip live cookie validation (register without probing grok.com)
+      </label>
+      <div id="grok-com-error" class="alert error" style="display:none; margin-bottom:0.75rem;"></div>
+      <button type="submit" id="grok-com-btn" class="button"
+              style="width:100%; font-size:1.05rem; padding:14px; background:#7c4dff;">
+        🤖 Register Grok.com Cookies →
+      </button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+/* ── shared helpers ── */
+function setBtn(btn, text, disabled) {
+  btn.disabled = disabled;
+  btn.textContent = text;
+}
+
+function showInlineError(el, msg) {
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function hideInlineError(el) {
+  el.style.display = "none";
+  el.textContent = "";
+}
+
+function showSuccess(data) {
+  localStorage.setItem("proxy_token", data.token);
+  const p = new URLSearchParams({
+    message:    data.message    || "",
+    token:      data.token      || "",
+    expires_at: data.expires_at || "",
+  });
+  // Only add expires_in when it is a real number – avoids FastAPI 422 on empty string
+  if (data.expires_in != null && data.expires_in !== "") {
+    p.set("expires_in", String(data.expires_in));
+  }
+  window.location.href = "/login/success?" + p.toString();
+}
+
+async function postJSON(url, body) {
+  const res  = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  return {res, data};
+}
+
+/* ── Twitter Bearer ── */
+const twitterErrEl = (() => {
+  const el = document.createElement("div");
+  el.className = "alert error"; el.style.display = "none";
+  const form = document.getElementById("twitter-bearer-form");
+  form.insertBefore(el, form.querySelector("button"));
+  return el;
+})();
+
+document.getElementById("twitter-bearer-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  hideInlineError(twitterErrEl);
+  const token = document.getElementById("twitter-bearer-input").value.trim();
+  const btn   = document.getElementById("twitter-bearer-btn");
+  const orig  = btn.textContent;
+  setBtn(btn, "⏳ Authenticating…", true);
+  try {
+    const {res, data} = await postJSON("/login/twitter/bearer", {bearer_token: token || null});
+    if (!res.ok) {
+      showInlineError(twitterErrEl, "❌ " + (data.error?.message || data.detail || "Auth failed"));
+      setBtn(btn, orig, false); return;
+    }
+    showSuccess(data);
+  } catch (err) { showInlineError(twitterErrEl, "❌ Network error: " + err); setBtn(btn, orig, false); }
+});
+
+/* ── xAI key ── */
+const xaiErrEl = (() => {
+  const el = document.createElement("div");
+  el.className = "alert error"; el.style.display = "none";
+  const form = document.getElementById("xai-form");
+  form.insertBefore(el, form.querySelector("button"));
+  return el;
+})();
+
+document.getElementById("xai-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  hideInlineError(xaiErrEl);
+  const key = document.getElementById("xai-key-input").value.trim();
+  if (!key) { showInlineError(xaiErrEl, "Please enter your xAI API key."); return; }
+  if (!key.startsWith("xai-") && !key.startsWith("gsk_")) {
+    showInlineError(xaiErrEl, "❌ xAI keys must start with xai- or gsk_"); return;
+  }
+  showSuccess({
+    message:    "✅ xAI key ready – use it directly as your Bearer token",
+    token:      key,
+    expires_at: "never",
+    expires_in: null,
+  });
+});
+
+/* ── Grok Web cookies ── */
+document.getElementById("grok-web-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl     = document.getElementById("grok-web-error");
+  hideInlineError(errEl);
+
+  const authToken  = document.getElementById("grok-auth-token").value.trim();
+  const ct0        = document.getElementById("grok-ct0").value.trim();
+  const fullCookie = document.getElementById("grok-web-full-cookie").value.trim() || null;
+  const ua         = document.getElementById("grok-web-ua").value.trim() || null;
+  const skipProbe  = document.getElementById("grok-skip-validation").checked;
+  const btn        = document.getElementById("grok-web-btn");
+  const orig       = btn.textContent;
+
+  if (!authToken || !ct0) {
+    showInlineError(errEl, "Both auth_token and ct0 are required."); return;
+  }
+
+  setBtn(btn, "⏳ Validating cookies…", true);
+
+  const url = skipProbe ? "/login/grok-web?skip_validation=true" : "/login/grok-web";
+  const body = { auth_token: authToken, ct0 };
+  if (fullCookie)  body.x_com_cookies = fullCookie;
+  if (ua)          body.user_agent    = ua;
+  try {
+    const {res, data} = await postJSON(url, body);
+    if (!res.ok) {
+      const detail = data.error?.message || data.detail || "Auth failed";
+      showInlineError(errEl,
+        "❌ " + detail +
+        (res.status === 401
+          ? "\n💡 Tip: Check the box above to skip live validation if grok.x.com is unreachable."
+          : "")
+      );
+      setBtn(btn, orig, false); return;
+    }
+    showSuccess(data);
+  } catch (err) { showInlineError(errEl, "❌ Network error: " + err); setBtn(btn, orig, false); }
+});
+
+/* ── Grok.com cookies ── */
+document.getElementById("grok-com-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl    = document.getElementById("grok-com-error");
+  hideInlineError(errEl);
+
+  const cookie    = document.getElementById("grok-com-cookie").value.trim();
+  const ua        = document.getElementById("grok-com-ua").value.trim() || null;
+  const skipProbe = document.getElementById("grok-com-skip-validation").checked;
+  const btn       = document.getElementById("grok-com-btn");
+  const orig      = btn.textContent;
+
+  if (!cookie) {
+    showInlineError(errEl, "Cookie header value is required."); return;
+  }
+
+  setBtn(btn, "⏳ Validating cookies…", true);
+
+  const url  = skipProbe ? "/login/grok-com?skip_validation=true" : "/login/grok-com";
+  const body = { cookie };
+  if (ua) body.user_agent = ua;
+  try {
+    const {res, data} = await postJSON(url, body);
+    if (!res.ok) {
+      const detail = data.error?.message || data.detail || "Auth failed";
+      showInlineError(errEl,
+        "❌ " + detail +
+        (res.status === 401
+          ? "\n💡 Tip: Re-copy the full Cookie header from a fresh grok.com browser session, or enable skip validation."
+          : "")
+      );
+      setBtn(btn, orig, false); return;
+    }
+    showSuccess(data);
+  } catch (err) { showInlineError(errEl, "❌ Network error: " + err); setBtn(btn, orig, false); }
+});
+</script>
+{% endblock %}

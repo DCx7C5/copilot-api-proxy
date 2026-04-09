@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}✅ Authenticated – OpenClaude Copilot Proxy{% endblock %}
+{% block header_title %}✅ Authentication Successful{% endblock %}
+{% block header_subtitle %}Your proxy token is ready{% endblock %}
+
+{% block extra_head %}
+<style>
+  .token-display {
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 1rem;
+    word-break: break-all;
+    background: var(--bg);
+    border: 2px solid var(--primary);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0;
+    color: var(--text);
+  }
+  .copy-btn {
+    background: var(--primary); color: white; border: none;
+    border-radius: 6px; padding: 8px 18px; cursor: pointer;
+    font-size: 0.95rem; font-weight: 500; margin-top: 0.5rem;
+    transition: opacity 0.2s;
+  }
+  .copy-btn:hover { opacity: 0.85; }
+  .meta { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.6rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 660px; margin: 0 auto;">
+
+  <div class="card">
+    <div class="alert success" style="font-size:1.1rem;">🎉 {{ message }}</div>
+
+    <h2 style="margin-top:1.5rem;">Your Proxy Token</h2>
+    <p style="color:var(--text-muted);">Use this as the API key in your client. Keep it secret.</p>
+
+    <div class="token-display" id="token-box" data-token="{{ token }}">{{ token }}</div>
+    <button class="copy-btn" onclick="copyToken()">📋 Copy Token</button>
+    <div class="meta">
+      Expires: {{ expires_at }}
+      {% if expires_in %}({{ (expires_in // 3600) }}h){% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🚀 Quick Start</h2>
+
+    <h3>OpenClaude / Claude Code</h3>
+    <pre><code># Option A – Umgebungsvariablen (empfohlen, kein Konflikt)
+unset ANTHROPIC_AUTH_TOKEN
+export ANTHROPIC_BASE_URL="{{ base_url }}"
+export ANTHROPIC_API_KEY="{{ token }}"
+
+# Modell setzen (Claude-Modelle empfohlen für /v1/messages)
+# claude /model claude-sonnet-4-6</code></pre>
+
+    <h3>OpenAI Python SDK</h3>
+    <pre><code>import openai
+client = openai.OpenAI(
+    api_key="{{ token }}",
+    base_url="{{ base_url }}/v1"
+)
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hello!"}]
+)</code></pre>
+
+    <h3>xAI Grok (via proxy)</h3>
+    <pre><code>client = openai.OpenAI(
+    api_key="{{ token }}",
+    base_url="{{ base_url }}/v1"
+)
+response = client.chat.completions.create(
+    model="grok-3",
+    messages=[{"role": "user", "content": "Hello, Grok!"}]
+)</code></pre>
+
+    <h3>cURL</h3>
+    <pre><code>curl -sk -X POST {{ base_url }}/v1/chat/completions \
+  -H "Authorization: Bearer {{ token }}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello!"}]}'</code></pre>
+  </div>
+
+  <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+    <a href="/dashboard" class="button">📊 Dashboard</a>
+    <a href="/login" class="button secondary">🔑 Get Another Token</a>
+    <a href="/v1/models" class="button secondary" target="_blank">🤖 List Models</a>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function copyToken() {
+  const box = document.getElementById("token-box");
+  const tok = box.dataset.token || box.textContent.trim();
+  navigator.clipboard.writeText(tok).then(() => {
+    const btn = document.querySelector(".copy-btn");
+    const orig = btn.textContent;
+    btn.textContent = "✓ Copied!";
+    setTimeout(() => { btn.textContent = orig; }, 1600);
+  }).catch(() => {
+    /* fallback for older browsers */
+    const ta = document.createElement("textarea");
+    ta.value = tok; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  });
+}
+</script>
+{% endblock %}

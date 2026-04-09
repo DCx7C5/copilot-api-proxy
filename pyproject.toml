@@ -24,3 +24,21 @@ copilot-api-proxy = "copilot_proxy_wrapper:main"
 [project.urls]
 Homepage = "https://github.com/dcx7c5/copilot-api-proxy"
 Repository = "https://github.com/dcx7c5/copilot-api-proxy.git"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.25.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+    "respx>=0.22.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "webapi: pure JSON/REST API endpoints (no HTML rendering)",
+    "html: HTML page / template rendering tests",
+]
+

@@ -1,124 +1,325 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - GitHub Copilot API Proxy{% endblock %}
-{% block header_title %}Service Dashboard{% endblock %}
-{% block header_subtitle %}Monitor your GitHub Copilot API Proxy{% endblock %}
+{% block title %}Dashboard – OpenClaude Copilot Proxy{% endblock %}
+{% block header_title %}📊 Service Dashboard{% endblock %}
+{% block header_subtitle %}Monitor your OpenClaude Copilot Proxy{% endblock %}
 
 {% block extra_head %}
 <script>
-    async function refreshStats() {
-        try {
-            const response = await fetch('/health');
-            const data = await response.json();
+/**
+ * @typedef {Object} HealthData
+ * @property {string} status
+ * @property {number} active_tokens
+ * @property {string} environment
+ * @property {number} uptime_seconds
+ * @property {string} version
+ * @property {string} timestamp
+ */
 
-            document.getElementById('status').textContent = data.status;
-            document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleString();
-            document.getElementById('active-tokens').textContent = data.active_tokens;
+async function refreshStats() {
+  /** @type {HTMLElement|null} */
+  const ind = document.getElementById('status-indicator');
 
-            // Update status indicator
-            const statusEl = document.getElementById('status-indicator');
-            statusEl.className = data.status === 'healthy' ? 'status healthy' : 'status error';
-            statusEl.innerHTML = data.status === 'healthy' ? '● Healthy' : '● Unhealthy';
-        } catch (error) {
-            console.error('Failed to refresh stats:', error);
-            document.getElementById('status-indicator').innerHTML = '<span class="status error">● Error</span>';
-        }
-    }
+  /** @type {Response} */
+  let res;
+  /** @type {HealthData} */
+  let h;
 
-    // Auto-refresh every 30 seconds
-    setInterval(refreshStats, 30000);
+  try {
+    res = await fetch('/health');
+    h   = await res.json();
+  } catch (err) {
+    console.error('Network error fetching /health:', err);
+    if (ind) { ind.className = 'status error'; ind.textContent = '● Unreachable'; }
+    return;
+  }
 
-    // Refresh on page load
-    document.addEventListener('DOMContentLoaded', refreshStats);
+  if (!res.ok) {
+    if (ind) { ind.className = 'status error'; ind.textContent = '● Error ' + res.status; }
+    return;
+  }
+
+  /** @param {string} id @param {string|number} val */
+  const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = String(val); };
+
+  setTxt('status',        h.status        != null ? h.status        : '—');
+  setTxt('timestamp',     h.timestamp     ? new Date(h.timestamp).toLocaleString() : '—');
+  setTxt('active-tokens', h.active_tokens != null ? h.active_tokens : '—');
+  setTxt('version',       h.version       != null ? h.version       : '—');
+  setTxt('environment',   h.environment   != null ? h.environment   : '—');
+  setTxt('uptime',        h.uptime_seconds != null ? formatUptime(Number(h.uptime_seconds)) : '—');
+
+  if (ind) {
+    ind.className   = 'status ' + (h.status === 'healthy' ? 'healthy' : 'error');
+    ind.textContent = h.status === 'healthy' ? '● Healthy' : '● Unhealthy';
+  }
+  resetCountdown();
+}
+
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  return `${m}m ${s}s`;
+}
+
+let countdown = 30;
+function resetCountdown() { countdown = 30; updateCountdown(); }
+function updateCountdown() {
+  const el = document.getElementById('next-refresh');
+  if (el) el.textContent = countdown + 's';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  refreshStats();
+  setInterval(refreshStats, 30000);
+  setInterval(() => { if (countdown > 0) countdown--; updateCountdown(); }, 1000);
+  initTokenWidget();
+});
 </script>
 {% endblock %}
 
 {% block content %}
 <div class="grid">
-    <div class="card">
-        <h2>🟢 Service Status</h2>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin: 1rem 0;">
-            <span id="status-indicator" class="status healthy">● Healthy</span>
-            <button onclick="refreshStats()" class="button secondary" style="font-size: 0.9rem;">Refresh</button>
-        </div>
+  <div class="card">
+    <h2>🟢 Service Status</h2>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin:1rem 0;">
+      <span id="status-indicator" class="status healthy">● Healthy</span>
+      <button onclick="refreshStats()" class="button secondary" style="font-size:0.85rem; padding:8px 14px;">
+        ↺ Refresh
+      </button>
+    </div>
+    <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
+      <tr><td style="padding:4px 0; color:var(--text-muted); width:40%;">Status</td>
+          <td><strong id="status">healthy</strong></td></tr>
+      <tr><td style="padding:4px 0; color:var(--text-muted);">Version</td>
+          <td><code id="version">{{ version if version is defined else "—" }}</code></td></tr>
+      <tr><td style="padding:4px 0; color:var(--text-muted);">Environment</td>
+          <td><span id="environment">—</span></td></tr>
+      <tr><td style="padding:4px 0; color:var(--text-muted);">Uptime</td>
+          <td><span id="uptime">—</span></td></tr>
+      <tr><td style="padding:4px 0; color:var(--text-muted);">Last Updated</td>
+          <td><span id="timestamp">Loading…</span></td></tr>
+      <tr><td style="padding:4px 0; color:var(--text-muted);">Base URL</td>
+          <td><code>{{ base_url }}</code></td></tr>
+    </table>
+  </div>
 
-        <div style="margin-top: 1.5rem;">
-            <p><strong>Status:</strong> <span id="status">healthy</span></p>
-            <p><strong>Last Updated:</strong> <span id="timestamp">Loading...</span></p>
-            <p><strong>Base URL:</strong> <code>{{ base_url }}</code></p>
-        </div>
+  <div class="card">
+    <h2>📊 Statistics</h2>
+    <div style="font-size:3rem; font-weight:bold; color:var(--primary); text-align:center; margin:1rem 0;">
+      <span id="active-tokens">{{ tokens }}</span>
+    </div>
+    <p style="text-align:center; color:var(--text-muted);">Active Authentication Tokens</p>
+
+    <div style="margin-top:1.5rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+      <a href="/login" class="button" style="flex:1; text-align:center;">🔑 New Token</a>
+      <a href="/v1/models" class="button secondary" style="flex:1; text-align:center;" target="_blank">🤖 Models</a>
     </div>
 
-    <div class="card">
-        <h2>📊 Statistics</h2>
-        <div style="font-size: 2rem; font-weight: bold; color: #667eea; text-align: center; margin: 1rem 0;">
-            <span id="active-tokens">{{ tokens }}</span>
-        </div>
-        <p style="text-align: center; color: #666;">Active Authentication Tokens</p>
-
-        <div style="margin-top: 1.5rem;">
-            <a href="/login" class="button" style="width: 100%; text-align: center;">
-                🔑 Create New Token
-            </a>
-        </div>
+    <div style="margin-top:0.75rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+      <button id="clear-expired-btn" class="button"
+              style="flex:1; background:#e67e22;"
+              onclick="clearTokens('expired')">🧹 Clear Expired</button>
+      <button id="clear-all-btn" class="button danger"
+              style="flex:1;"
+              onclick="clearTokens('all')">🗑️ Clear All</button>
     </div>
+
+    <div id="clear-result" class="alert" style="display:none; margin-top:0.75rem;"></div>
+
+    <p style="text-align:center; color:var(--text-muted); font-size:0.85rem; margin-top:1rem;">
+      Auto-refresh in <span id="next-refresh">30s</span>
+    </p>
+  </div>
+</div>
+
+<!-- ── Admin Token Widget ── -->
+<div class="card" id="token-widget">
+  <h2>🔐 Admin Token</h2>
+  <p style="color:var(--text-muted); margin-bottom:0.75rem; font-size:0.9rem;">
+    Required for Clear / List operations. Paste your <code>cp-…</code> proxy token here.
+    It is stored only in your browser's <code>localStorage</code>.
+  </p>
+  <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+    <input type="password" id="admin-token-input"
+           placeholder="cp-… (paste your proxy token)"
+           style="flex:1; min-width:0; padding:10px 12px; border:1px solid var(--border);
+                  border-radius:6px; font-family:monospace; font-size:0.9rem;
+                  background:var(--bg); color:var(--text);">
+    <button onclick="saveAdminToken()" class="button" style="white-space:nowrap;">💾 Save</button>
+    <button onclick="clearAdminToken()" class="button secondary" style="white-space:nowrap;">🗑 Forget</button>
+  </div>
+  <div id="token-widget-status" style="margin-top:0.5rem; font-size:0.85rem; color:var(--text-muted);"></div>
 </div>
 
 <div class="card">
-    <h2>🔗 API Endpoints</h2>
-    <div class="grid">
-        <div>
-            <h3>OpenAI-Compatible Endpoints</h3>
-            <ul style="margin-left: 1rem;">
-                <li><code>POST /v1/chat/completions</code> - Chat completions</li>
-                <li><code>GET /v1/models</code> - List available models</li>
-            </ul>
-        </div>
-
-        <div>
-            <h3>Management Endpoints</h3>
-            <ul style="margin-left: 1rem;">
-                <li><code>GET /health</code> - Health check</li>
-                <li><code>GET /login</code> - Start authentication</li>
-                <li><code>GET /auth/callback</code> - OAuth callback</li>
-            </ul>
-        </div>
+  <h2>🔗 API Endpoints</h2>
+  <div class="grid">
+    <div>
+      <h3>OpenAI-Compatible</h3>
+      <ul style="margin-left:1rem; line-height:2;">
+        <li><code>POST /v1/chat/completions</code> — Chat completions</li>
+        <li><code>POST /v1/messages</code> — Anthropic-compatible</li>
+        <li><code>GET  /v1/models</code> — List models</li>
+      </ul>
     </div>
-
-    <div style="margin-top: 2rem;">
-        <a href="/docs" target="_blank" class="button">📖 View Full API Documentation</a>
-        <a href="/redoc" target="_blank" class="button secondary">📚 Alternative Documentation</a>
+    <div>
+      <h3>Management</h3>
+      <ul style="margin-left:1rem; line-height:2;">
+        <li><code>GET  /health</code> — Health check (JSON)</li>
+        <li><code>GET  /login</code> — Auth page</li>
+        <li><code>GET  /login/device</code> — Device Flow</li>
+        <li><code>POST /login/pat</code> — PAT auth</li>
+        <li><code>POST /login/grok-web</code> — Grok Web cookies</li>
+        <li><code>POST /login/grok-com</code> — Grok.com cookies</li>
+        <li><code>GET  /admin/tokens</code> — List tokens</li>
+        <li><code>DELETE /admin/tokens</code> — Clear all tokens</li>
+        <li><code>DELETE /admin/tokens/expired</code> — Clear expired</li>
+        <li><code>DELETE /admin/tokens/{id}</code> — Revoke one token</li>
+        <li><code>GET  /auth/callback</code> — OAuth callback</li>
+      </ul>
     </div>
+  </div>
+  <div style="margin-top:1.5rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+    <a href="/docs"  target="_blank" class="button">📖 Swagger UI</a>
+    <a href="/redoc" target="_blank" class="button secondary">📚 ReDoc</a>
+  </div>
 </div>
 
 <div class="grid">
-    <div class="card">
-        <h2>🛠️ Quick Actions</h2>
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-            <a href="/health" class="button secondary">Check Health</a>
-            <a href="/login" class="button">Authenticate</a>
-            <a href="/docs" class="button secondary">API Docs</a>
-        </div>
+  <div class="card">
+    <h2>🛠️ Quick Actions</h2>
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+      <a href="/health"    class="button secondary">❤️ Health JSON</a>
+      <a href="/login"     class="button">🔑 Authenticate</a>
+      <a href="/v1/models" class="button secondary" target="_blank">🤖 Models</a>
+      <a href="/docs"      class="button secondary" target="_blank">📖 Docs</a>
     </div>
+  </div>
 
-    <div class="card">
-        <h2>📋 Recent Activity</h2>
-        <p style="color: #666; font-style: italic;">Activity monitoring will be available in a future update.</p>
-        <div style="margin-top: 1rem;">
-            <small>Features planned:</small>
-            <ul style="margin-left: 2rem; margin-top: 0.5rem;">
-                <li>Request volume metrics</li>
-                <li>Token usage statistics</li>
-                <li>Error rate monitoring</li>
-                <li>Performance metrics</li>
-            </ul>
-        </div>
-    </div>
+  <div class="card">
+    <h2>🔒 Security Mode</h2>
+    <ul style="margin-left:1rem; line-height:2.2;">
+      <li>🔒 <strong>Direct TLS</strong> on <code>:8443</code> (no Caddy)</li>
+      <li>🛡️ systemd security hardening active</li>
+      <li>⏱️ Tokens auto-expire after 24h</li>
+      <li>🧹 Expired tokens cleaned up automatically</li>
+    </ul>
+  </div>
 </div>
 
 <div class="alert info">
-    <strong>💡 Pro Tip:</strong>
-    This dashboard automatically refreshes every 30 seconds to show the latest service status.
-    You can also click the "Refresh" button to update immediately.
+  <strong>💡 Tip:</strong>
+  The dashboard auto-refreshes every 30 seconds.
+  Click <strong>↺ Refresh</strong> for an immediate update.
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+/* ── Admin Token Widget ── */
+function initTokenWidget() {
+  const stored = localStorage.getItem('proxy_token') || '';
+  const inp    = document.getElementById('admin-token-input');
+  const st     = document.getElementById('token-widget-status');
+  if (stored) {
+    inp.value   = stored;
+    st.innerHTML = '✅ Token loaded from localStorage — <code>' + stored.slice(0, 12) + '…</code>';
+    st.style.color = 'var(--success, #27ae60)';
+  } else {
+    st.textContent = '⚠️ No token stored. Paste your proxy token above to enable admin actions.';
+    st.style.color = '#e67e22';
+  }
+}
+
+function saveAdminToken() {
+  const val = (document.getElementById('admin-token-input').value || '').trim();
+  const st  = document.getElementById('token-widget-status');
+  if (!val) { st.textContent = '❌ Token is empty.'; st.style.color = 'red'; return; }
+  localStorage.setItem('proxy_token', val);
+  st.innerHTML   = '✅ Saved — <code>' + val.slice(0, 12) + '…</code>';
+  st.style.color = 'var(--success, #27ae60)';
+}
+
+function clearAdminToken() {
+  localStorage.removeItem('proxy_token');
+  document.getElementById('admin-token-input').value = '';
+  const st = document.getElementById('token-widget-status');
+  st.textContent = '🗑 Token forgotten.';
+  st.style.color = 'var(--text-muted)';
+}
+
+/* ── Clear Tokens ── */
+async function clearTokens(mode) {
+  const allBtn   = document.getElementById('clear-all-btn');
+  const expBtn   = document.getElementById('clear-expired-btn');
+  const resultEl = document.getElementById('clear-result');
+
+  /* resolve token: localStorage first, then the visible input as fallback */
+  let token = (localStorage.getItem('proxy_token') || '').trim();
+  if (!token) {
+    token = (document.getElementById('admin-token-input').value || '').trim();
+  }
+
+  if (!token) {
+    resultEl.className     = 'alert error';
+    resultEl.textContent   = '❌ No admin token set. Paste your cp-… token in the Admin Token box above and click Save.';
+    resultEl.style.display = 'block';
+    document.getElementById('admin-token-input').focus();
+    return;
+  }
+
+  if (mode === 'all') {
+    if (!confirm('⚠️ This will revoke ALL tokens including your own.\nYou will need to re-authenticate.\nContinue?')) return;
+  }
+
+  const url     = mode === 'expired' ? '/admin/tokens/expired' : '/admin/tokens';
+  const origAll = allBtn.textContent;
+  const origExp = expBtn.textContent;
+  allBtn.disabled = expBtn.disabled = true;
+  if (mode === 'all') allBtn.textContent = '⏳ Clearing…';
+  else                expBtn.textContent = '⏳ Clearing…';
+  resultEl.style.display = 'none';
+
+  try {
+    const res  = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    const data = await res.json();
+    if (res.ok) {
+      resultEl.className     = 'alert success';
+      resultEl.textContent   = data.message || '✅ Done';
+      resultEl.style.display = 'block';
+      const el = document.getElementById('active-tokens');
+      if (el) el.textContent = String(data.remaining ?? 0);
+      if (mode === 'all') {
+        localStorage.removeItem('proxy_token');
+        document.getElementById('admin-token-input').value = '';
+        document.getElementById('token-widget-status').textContent = '⚠️ All tokens cleared — re-authenticate to get a new token.';
+        document.getElementById('token-widget-status').style.color = '#e67e22';
+        resultEl.textContent += ' · Re-authenticate at /login to get a new token.';
+      }
+    } else {
+      resultEl.className     = 'alert error';
+      const msg = data.error?.message || data.detail || 'Error';
+      resultEl.textContent   = '❌ ' + msg +
+        (res.status === 401 ? ' — Token invalid or not stored. Update the Admin Token box above.' : '');
+      resultEl.style.display = 'block';
+    }
+  } catch (err) {
+    resultEl.className     = 'alert error';
+    resultEl.textContent   = '❌ Network error: ' + err;
+    resultEl.style.display = 'block';
+  } finally {
+    allBtn.disabled = expBtn.disabled = false;
+    allBtn.textContent = origAll;
+    expBtn.textContent = origExp;
+  }
+}
+</script>
 {% endblock %}

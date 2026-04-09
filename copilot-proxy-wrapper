@@ -10,8 +10,9 @@ import os
 import sys
 import logging
 import subprocess
+import ipaddress
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes
@@ -22,7 +23,7 @@ from cryptography.hazmat.primitives import serialization
 SERVICE_ROOT = Path("/usr/lib/copilot-api-proxy")
 DATA_DIR = Path("/var/lib/copilot-api-proxy")
 CONFIG_FILE = Path("/etc/copilot-api-proxy/config.env")
-CERT_DIR = Path("/etc/ssl/copilot-api-proxy")
+CERT_DIR = DATA_DIR / "ssl"
 CERT_FILE = CERT_DIR / "server.crt"
 KEY_FILE = CERT_DIR / "server.key"
 
@@ -66,12 +67,16 @@ def generate_tls_certificates() -> bool:
             .issuer_name(subject)
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.utcnow())
-            .not_valid_after(datetime.utcnow() + timedelta(days=365))
+            .not_valid_before(datetime.now(timezone.utc))
+            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=365))
+            .add_extension(
+                x509.BasicConstraints(ca=True, path_length=0),
+                critical=True,
+            )
             .add_extension(
                 x509.SubjectAlternativeName([
                     x509.DNSName("localhost"),
-                    x509.IPAddress("127.0.0.1"),
+                    x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
                 ]),
                 critical=False,
             )
@@ -92,15 +97,27 @@ def generate_tls_certificates() -> bool:
 
         KEY_FILE.chmod(0o640)
         CERT_FILE.chmod(0o644)
+        CERT_DIR.chmod(0o755)  # cert is public, dir must be traversable
 
         logging.info("✅ TLS certificates generated successfully (pure Python)")
 
-        # Add to system trust store
+        # Add to system trust store (best effort - requires root)
         try:
-            trust_path = Path("/usr/local/share/ca-certificates/copilot-proxy.crt")
-            trust_path.write_bytes(CERT_FILE.read_bytes())
-            subprocess.run(["update-ca-certificates"], check=False, capture_output=True)
+            trust_paths = [
+                Path("/etc/ca-certificates/trust-source/anchors/copilot-proxy.crt"),  # Arch
+                Path("/usr/local/share/ca-certificates/copilot-proxy.crt"),            # Debian
+                Path("/etc/pki/ca-trust/source/anchors/copilot-proxy.crt"),            # RHEL
+            ]
+            cert_bytes = CERT_FILE.read_bytes()
+            for tp in trust_paths:
+                try:
+                    tp.parent.mkdir(parents=True, exist_ok=True)
+                    tp.write_bytes(cert_bytes)
+                    break
+                except PermissionError:
+                    continue
             subprocess.run(["update-ca-trust"], check=False, capture_output=True)
+            subprocess.run(["update-ca-certificates"], check=False, capture_output=True)
         except Exception:
             pass  # best effort
 
@@ -120,6 +137,14 @@ def setup_environment():
         if (path / "bin" / "python").exists():
             os.environ["VIRTUAL_ENV"] = str(path)
             os.environ["PATH"] = f"{path / 'bin'}:{os.environ.get('PATH', '')}"
+
+            # Add venv site-packages to sys.path so imports work
+            import glob
+            site_packages = glob.glob(str(path / "lib" / "python*" / "site-packages"))
+            for sp in site_packages:
+                if sp not in sys.path:
+                    sys.path.insert(0, sp)
+            logging.info(f"Activated venv: {path}")
             break
 
 def load_environment_config():
@@ -148,6 +173,7 @@ def main():
             logging.error("Critical: Could not generate TLS certificates. Aborting.")
             sys.exit(1)
 
+    # Activate venv BEFORE importing config (needs pydantic_settings etc.)
     setup_environment()
 
     try:
