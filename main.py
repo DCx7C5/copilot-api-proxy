@@ -577,8 +577,26 @@ _COPILOT_MODEL_ALIASES: Dict[str, str] = {
 
 
 def resolve_copilot_model(model: str) -> str:
-    """Resolve a (possibly aliased) model name to the real Copilot model ID."""
-    return _COPILOT_MODEL_ALIASES.get(model.lower(), model)
+    """Resolve a (possibly aliased) model name to the real Copilot model ID.
+
+    Handles:
+    - Explicit aliases in _COPILOT_MODEL_ALIASES
+    - Date-suffixed variants Claude Code sends internally, e.g.
+      'claude-haiku-4-5-20251001' → strip the date → 'claude-haiku-4-5' → alias lookup
+    """
+    import re as _re
+    m = model.lower()
+    # 1. Direct alias lookup
+    if m in _COPILOT_MODEL_ALIASES:
+        return _COPILOT_MODEL_ALIASES[m]
+    # 2. Strip trailing date suffix (YYYYMMDD) and retry
+    stripped = _re.sub(r"-\d{8}$", "", m)
+    if stripped != m and stripped in _COPILOT_MODEL_ALIASES:
+        return _COPILOT_MODEL_ALIASES[stripped]
+    if stripped != m:
+        # Also try stripping and resolving dot/dash normalisation
+        return _COPILOT_MODEL_ALIASES.get(stripped, stripped)
+    return model
 
 
 ANTHROPIC_API_BASE = "https://api.anthropic.com/v1"
