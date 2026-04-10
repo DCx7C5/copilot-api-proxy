@@ -1506,7 +1506,11 @@ async def auth_callback(request: Request, code: str, state: str):
         pass
 
     api_token = f"cp-{int(time.time())}-{secrets.token_urlsafe(16)}"
-    expires_in = result.get("expires_in") or (settings.security.token_expiry_hours * 3600)
+    # Use the larger of GitHub's expires_in and our configured minimum.
+    # GitHub Copilot OAuth tokens often expire after only 8h (28800s) — too short for daily use.
+    github_expires_in = result.get("expires_in") or 0
+    config_expires_in = settings.security.token_expiry_hours * 3600
+    expires_in = max(github_expires_in, config_expires_in)
     expires_at_ts = time.time() + expires_in
     TOKENS[api_token] = TokenData(
         github_token=result["access_token"],
@@ -1972,7 +1976,11 @@ async def device_flow_poll(request: Request, device_code: str):
         pass
 
     api_token = f"cp-{int(time.time())}-{secrets.token_urlsafe(16)}"
-    expires_in = result.get("expires_in") or (settings.security.token_expiry_hours * 3600)
+    # Use the larger of GitHub's expires_in and our configured minimum.
+    # GitHub Copilot OAuth tokens often expire after only 8h (28800s) — too short for daily use.
+    github_expires_in = result.get("expires_in") or 0
+    config_expires_in = settings.security.token_expiry_hours * 3600
+    expires_in = max(github_expires_in, config_expires_in)
     expires_at_ts = time.time() + expires_in
     TOKENS[api_token] = TokenData(
         github_token=result["access_token"],

@@ -337,7 +337,8 @@ async def test_device_poll_success_user_fetch_fails_token_still_stored(client):
 @pytest.mark.webapi
 @pytest.mark.asyncio
 async def test_device_poll_success_uses_github_expires_in(client):
-    # GIVEN GitHub provides its own expires_in (8 hours = 28800 s)
+    # GIVEN GitHub provides expires_in (8h = 28800s) but config minimum is larger
+    # → max(28800, token_expiry_hours * 3600) is used
     with patch("main._github_configured", return_value=True), respx.mock:
         respx.post("https://github.com/login/oauth/access_token").mock(
             return_value=httpx.Response(200, json={
@@ -350,8 +351,11 @@ async def test_device_poll_success_uses_github_expires_in(client):
         )
         r = await client.get("/login/device/poll?device_code=exp-code")
 
+    from config import get_settings
+    config_expires = get_settings().security.token_expiry_hours * 3600
     assert r.status_code == 200
-    assert r.json()["expires_in"] == 28800
+    # Result must be at least as long as config minimum
+    assert r.json()["expires_in"] >= config_expires
 
 
 @pytest.mark.webapi
