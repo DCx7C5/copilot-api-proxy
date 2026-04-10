@@ -155,55 +155,6 @@ async def test_messages_no_auth_returns_401(client):
         json={"model": "claude-3-5-sonnet", "messages": [{"role": "user", "content": "Hi"}]})
     assert r.status_code == 401
 # ═══════════════════════════════════════════════════════════════════════════════
-#  PAT login
-# ═══════════════════════════════════════════════════════════════════════════════
-@pytest.mark.webapi
-@pytest.mark.asyncio
-async def test_pat_login_valid(client):
-    with respx.mock:
-        respx.get("https://api.github.com/user").mock(
-            return_value=httpx.Response(200, json={"login": "octocat", "id": 1}))
-        r = await client.post("/login/pat", json={"github_token": "ghp_valid"})
-    assert r.status_code == 200
-    data = r.json()
-    assert data["token"].startswith("cp-")
-    assert isinstance(data["expires_in"], int) and data["expires_in"] > 0
-@pytest.mark.webapi
-@pytest.mark.asyncio
-async def test_pat_login_invalid_returns_401(client):
-    with respx.mock:
-        respx.get("https://api.github.com/user").mock(
-            return_value=httpx.Response(401, json={"message": "Bad credentials"}))
-        r = await client.post("/login/pat", json={"github_token": "ghp_bad"})
-    assert r.status_code == 401
-@pytest.mark.webapi
-@pytest.mark.asyncio
-async def test_pat_login_github_500_returns_502(client):
-    with respx.mock:
-        respx.get("https://api.github.com/user").mock(
-            return_value=httpx.Response(500, text="Server Error"))
-        r = await client.post("/login/pat", json={"github_token": "ghp_test"})
-    assert r.status_code == 502
-@pytest.mark.webapi
-@pytest.mark.asyncio
-async def test_pat_login_stores_token(client):
-    with respx.mock:
-        respx.get("https://api.github.com/user").mock(
-            return_value=httpx.Response(200, json={"login": "octocat", "id": 1}))
-        r = await client.post("/login/pat", json={"github_token": "ghp_stored"})
-    cp_token = r.json()["token"]
-    assert cp_token in TOKENS
-    assert TOKENS[cp_token].github_token == "ghp_stored"
-@pytest.mark.html
-@pytest.mark.asyncio
-async def test_pat_login_form_valid(client):
-    with respx.mock:
-        respx.get("https://api.github.com/user").mock(
-            return_value=httpx.Response(200, json={"login": "octocat", "id": 1}))
-        r = await client.post("/login/pat/form", data={"github_token": "ghp_valid"})
-    assert r.status_code == 200
-    assert "text/html" in r.headers["content-type"]
-# ═══════════════════════════════════════════════════════════════════════════════
 #  Device flow
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.html

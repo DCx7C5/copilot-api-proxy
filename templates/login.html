@@ -84,23 +84,6 @@
     </a>
   </div>
 
-  <!-- ── PAT ── -->
-  <div class="card">
-    <h2>🗝️ Personal Access Token <span class="method-badge badge-green">Instant</span></h2>
-    <p class="card-muted">
-      Paste a GitHub PAT — no App or callback needed.
-      Create one at <a href="https://github.com/settings/tokens/new?scopes=read:user" target="_blank">github.com/settings/tokens</a>
-      with scope <code>read:user</code>.
-    </p>
-    <form action="/login/pat/form" method="post" style="margin-top:1.2rem;">
-      <label for="github_token" style="display:none;">GitHub Personal Access Token</label>
-      <input type="password" id="github_token" name="github_token"
-             placeholder="ghp_…" class="login-input">
-      <button type="submit" class="button" style="width:100%; font-size:1.05rem; padding:14px;">
-        Submit PAT →
-      </button>
-    </form>
-  </div>
 
   <!-- ── Twitter / X.com Bearer Token ── -->
   <div class="card">

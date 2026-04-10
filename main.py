@@ -262,9 +262,6 @@ class DeviceFlowResponse(BaseModel):
     poll_url: str
 
 
-class PATLoginRequest(BaseModel):
-    github_token: str = Field(..., description="GitHub Personal Access Token (classic or fine-grained)")
-
 
 class TwitterLoginRequest(BaseModel):
     oauth_token: str = Field(..., description="Twitter/X.com OAuth token")
@@ -488,7 +485,7 @@ async def _get_copilot_token(github_token: str) -> str:
             if resp.status_code == 401:
                 raise HTTPException(
                     status_code=401,
-                    detail="GitHub token rejected. Re-authenticate via /login/pat or /login/device.",
+                    detail="GitHub token rejected. Re-authenticate via /login/device.",
                 )
             if resp.status_code == 200:
                 data = resp.json()
@@ -513,8 +510,7 @@ async def _get_copilot_token(github_token: str) -> str:
     logger.warning(
         f"Copilot token exchange failed (last HTTP {last_status}: "
         f"{last_text[:120].strip()!r}); falling back to raw token. "
-        "Claude models need a GitHub PAT with Copilot access — "
-        "create one at https://github.com/settings/tokens and POST to /login/pat."
+        "Use Device Flow at /login/device to obtain a valid GitHub OAuth token."
     )
     return github_token
 
@@ -1526,102 +1522,6 @@ async def auth_callback(request: Request, code: str, state: str):
 
 # ==================== LOGIN API ENDPOINTS ====================
 
-@app.post("/login/pat", response_model=AuthResponse)
-@limiter.limit("10/minute")
-async def login_pat(request: Request, body: PATLoginRequest):
-    """
-    Handles logging in using a GitHub Personal Access Token (PAT). This endpoint validates the
-    provided GitHub token, retrieves user information from GitHub, and issues an API token for
-    authenticated access to the service. The API token includes an expiration time and will be
-    stored for subsequent validation.
-
-    The function enforces rate limiting to ensure no more than 10 requests per minute from the
-    same client. It also checks the validity of the GitHub token by querying the GitHub API and
-    returns an appropriate HTTP status code if the authentication fails.
-
-    :param request: The incoming HTTP request to the login endpoint
-        (: class:`~starlette.requests.Request`).
-    :param body: The request payload containing the GitHub Personal Access Token
-        (: class:`PATLoginRequest`).
-    :return: A response containing the generated API token, expiration time (in seconds), and
-        the expiration timestamp in ISO 8601 format (: class:`AuthResponse`).
-    """
-    github_token = body.github_token.strip()
-    if not github_token:
-        raise HTTPException(status_code=400, detail="github_token is required")
-
-    # Validate token against GitHub API
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            "https://api.github.com/user",
-            headers={"Authorization": f"Bearer {github_token}", "Accept": "application/json"},
-        )
-    if resp.status_code == 401:
-        raise HTTPException(status_code=401, detail="Invalid GitHub token — authentication failed")
-    if resp.status_code >= 500:
-        raise HTTPException(status_code=502, detail=f"GitHub API returned {resp.status_code}")
-    if resp.status_code not in (200, 403):
-        raise HTTPException(status_code=400, detail=f"GitHub API returned {resp.status_code}")
-    user_info: Dict[str, Any] = resp.json() if resp.status_code == 200 else {}
-
-    api_token = f"cp-{int(time.time())}-{secrets.token_urlsafe(16)}"
-    expires_in = settings.security.token_expiry_hours * 3600
-    expires_at_ts = time.time() + expires_in
-    TOKENS[api_token] = TokenData(
-        github_token=github_token,
-        created=time.time(),
-        expires_at=expires_at_ts,
-        user_info=user_info,
-    )
-    await token_manager.save_tokens()
-    logger.info(f"PAT login: new token issued (user={user_info.get('login', '?')})")
-    return AuthResponse(
-        message="PAT registered successfully",
-        token=api_token,
-        expires_in=expires_in,
-        expires_at=datetime.fromtimestamp(expires_at_ts).isoformat(),
-    )
-
-
-@app.post("/login/pat/form", response_class=HTMLResponse)
-@limiter.limit("10/minute")
-async def login_pat_form(request: Request):
-    """HTML-form PAT login (renders auth_success.html on success)."""
-    form = await request.form()
-    github_token = str(form.get("github_token", "")).strip()
-    if not github_token:
-        return RedirectResponse(url="/login?error=token_required", status_code=302)
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            "https://api.github.com/user",
-            headers={"Authorization": f"Bearer {github_token}", "Accept": "application/json"},
-        )
-    if resp.status_code == 401:
-        return RedirectResponse(url="/login?error=invalid_token", status_code=302)
-    user_info: Dict[str, Any] = resp.json() if resp.status_code == 200 else {}
-
-    api_token = f"cp-{int(time.time())}-{secrets.token_urlsafe(16)}"
-    expires_in_secs = settings.security.token_expiry_hours * 3600
-    expires_at_ts = time.time() + expires_in_secs
-    TOKENS[api_token] = TokenData(
-        github_token=github_token,
-        created=time.time(),
-        expires_at=expires_at_ts,
-        user_info=user_info,
-    )
-    await token_manager.save_tokens()
-    return templates.TemplateResponse(
-        request, "auth_success.html",
-        {
-            "base_url": settings.base_url,
-            "message": "PAT registered successfully",
-            "token": api_token,
-            "expires_at": datetime.fromtimestamp(expires_at_ts).isoformat(),
-            "expires_in": expires_in_secs,
-        },
-    )
-
 
 @app.post("/login/twitter/bearer", response_model=AuthResponse)
 @limiter.limit("10/minute")
@@ -2095,7 +1995,7 @@ async def device_flow_poll(request: Request, device_code: str):
 _raw_prefixes = (
     "xai-", "gsk_",        # xAI / Grok API keys
     "sk-ant-",             # Anthropic API keys
-    "ghp_", "github_pat_", "gho_",  # GitHub PAT / OAuth tokens
+    "gho_",                # GitHub OAuth tokens (from Device Flow / Web OAuth)
     GROK_WEB_TOKEN_PREFIX,
     GROK_COM_TOKEN_PREFIX,
     TWITTER_OAUTH_TOKEN_PREFIX,
@@ -2547,7 +2447,13 @@ async def list_models(
         except Exception as exc:  # noqa: BLE001 – live Copilot fetch is best-effort
             logger.warning(f"Copilot live models fetch failed ({exc}), using static list")
         if not models:
-            models = static_copilot_models
+            models = list(static_copilot_models)
+        # Always include static Claude models so clients (e.g. openclaude) can resolve
+        # a Claude model even when the live Copilot account only returns GPT models.
+        _static_ids = {m["id"] for m in models}
+        for m in static_copilot_models:
+            if m["id"] not in _static_ids:
+                models.append(m)
         models += static_grok_models
 
     else:

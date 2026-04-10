@@ -1,5 +1,0 @@
-# uv-specific configuration
-# project metadata and dependencies belong in pyproject.toml
-
-[pip]
-index-url = "https://pypi.org/simple"
