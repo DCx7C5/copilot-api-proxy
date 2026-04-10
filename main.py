@@ -2359,6 +2359,63 @@ async def chat_completions(
     return response.json()
 
 
+def _openai_to_anthropic_response(openai_data: dict, original_model: str) -> dict:
+    """Convert an OpenAI chat completion response dict to Anthropic /v1/messages format."""
+    choice = openai_data.get("choices", [{}])[0]
+    msg = choice.get("message", {})
+    text = msg.get("content") or ""
+    finish_reason = choice.get("finish_reason", "stop")
+    stop_reason = {"stop": "end_turn", "length": "max_tokens"}.get(finish_reason, "end_turn")
+    usage = openai_data.get("usage", {})
+    return {
+        "id": openai_data.get("id", f"msg_{_uuid.uuid4().hex[:24]}"),
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": text}] if text else [],
+        "model": original_model,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+        },
+    }
+
+
+async def _openai_sse_to_anthropic_sse(body_iterator, model: str):
+    """Convert an OpenAI SSE body iterator to Anthropic SSE events."""
+    msg_id = f"msg_{_uuid.uuid4().hex[:24]}"
+    yield (
+        f'event: message_start\ndata: {json.dumps({"type": "message_start", "message": {"id": msg_id, "type": "message", "role": "assistant", "content": [], "model": model, "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 0, "output_tokens": 0}}})}\n\n'
+    )
+    yield f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})}\n\n'
+    yield 'event: ping\ndata: {"type":"ping"}\n\n'
+
+    output_tokens = 0
+    async for raw_chunk in body_iterator:
+        if isinstance(raw_chunk, bytes):
+            raw_chunk = raw_chunk.decode()
+        for line in raw_chunk.splitlines():
+            line = line.strip()
+            if not line or not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data == "[DONE]":
+                continue
+            try:
+                obj = json.loads(data)
+                content = (obj.get("choices", [{}])[0].get("delta", {}) or {}).get("content", "")
+                if content:
+                    output_tokens += 1
+                    yield f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": content}})}\n\n'
+            except (json.JSONDecodeError, IndexError, KeyError):
+                pass
+
+    yield f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": 0})}\n\n'
+    yield f'event: message_delta\ndata: {json.dumps({"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": output_tokens}})}\n\n'
+    yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+
 @app.post("/v1/messages")
 @limiter.limit(f"{settings.security.rate_limit_requests}/minute")
 async def claude_messages(
@@ -2369,7 +2426,7 @@ async def claude_messages(
     """
     Anthropic /v1/messages endpoint.
     - sk-ant-* tokens → forwarded raw to api.anthropic.com (Claude Code / ANTHROPIC_AUTH_TOKEN)
-    - cp-* / xai-* tokens → converted to OpenAI format and routed via chat_completions
+    - cp-* / xai-* tokens → converted to OpenAI format, proxied, then converted back to Anthropic format
     """
     # Anthropic direct pass-through (e.g., Claude Code with ANTHROPIC_AUTH_TOKEN)
     if raw_token and raw_token.startswith("sk-ant-"):
@@ -2388,7 +2445,39 @@ async def claude_messages(
         max_tokens=claude_req.max_tokens,
         temperature=claude_req.temperature,
     )
-    return await chat_completions(request, openai_req, raw_token)
+    openai_response = await chat_completions(request, openai_req, raw_token)
+
+    # Pass errors through unchanged
+    status = getattr(openai_response, "status_code", 200)
+    if status >= 400:
+        return openai_response
+
+    # Streaming: wrap the SSE iterator and emit Anthropic SSE events
+    if claude_req.stream:
+        return StreamingResponse(
+            _openai_sse_to_anthropic_sse(openai_response.body_iterator, claude_req.model),
+            media_type="text/event-stream",
+            headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+        )
+
+    # Non-streaming: parse OpenAI JSON body and convert to Anthropic format
+    if isinstance(openai_response, dict):
+        # chat_completions() returned a dict directly (non-streaming success)
+        anthropic_data = _openai_to_anthropic_response(openai_response, claude_req.model)
+        return JSONResponse(content=anthropic_data, status_code=200)
+    elif hasattr(openai_response, "body"):
+        body_bytes: bytes = openai_response.body
+    else:
+        body_bytes = b""
+        async for chunk in openai_response.body_iterator:
+            body_bytes += chunk if isinstance(chunk, bytes) else chunk.encode()
+
+    try:
+        openai_data = json.loads(body_bytes)
+        anthropic_data = _openai_to_anthropic_response(openai_data, claude_req.model)
+        return JSONResponse(content=anthropic_data, status_code=200)
+    except Exception:
+        return openai_response
 
 
 @app.get("/v1/models")
