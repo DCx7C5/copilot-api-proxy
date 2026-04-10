@@ -1359,8 +1359,8 @@ def _get_session_browser_info(credential: str) -> tuple:
 
 
 def _github_configured() -> bool:
-    """Return True only when a real (non-placeholder) GitHub OAuth Client ID is set."""
-    cid = (settings.github.client_id or "").strip().lower()
+    """Return True when a real (non-placeholder) GitHub Client ID is set for Device Flow."""
+    cid = (settings.github.device_flow_client_id or settings.github.client_id or "").strip().lower()
     return bool(cid and cid not in _PLACEHOLDER_IDS)
 
 
@@ -1918,7 +1918,7 @@ async def login_device_flow(request: Request):
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             "https://github.com/login/device/code",
-            data={"client_id": settings.github.client_id, "scope": " ".join(settings.github.oauth_scopes)},
+            data={"client_id": settings.github.device_flow_client_id or settings.github.client_id, "scope": " ".join(settings.github.oauth_scopes)},
             headers={"Accept": "application/json"},
         )
     if resp.status_code != 200:
@@ -1954,7 +1954,7 @@ async def device_flow_poll(request: Request, device_code: str):
         resp = await client.post(
             "https://github.com/login/oauth/access_token",
             data={
-                "client_id": settings.github.client_id,
+                "client_id": settings.github.device_flow_client_id or settings.github.client_id,
                 "device_code": device_code,
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             },

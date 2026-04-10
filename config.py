@@ -74,6 +74,10 @@ class GitHubConfig(BaseModel):
     """GitHub App configuration"""
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
+    # Separate Client ID for Device Flow — uses the VSCode Copilot App
+    # (Iv1.b507a08c87ecfe98) which is whitelisted for copilot_internal/v2/token.
+    # Falls back to client_id if not set.
+    device_flow_client_id: Optional[str] = None
     redirect_uri: str = "https://localhost:8443/auth/callback"
     oauth_scopes: list = ["read:user"]
 
