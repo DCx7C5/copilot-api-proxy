@@ -553,20 +553,26 @@ def is_grok_model(model: str) -> bool:
 
 
 def normalize_model_name(model: str) -> str:
-    """Normalize model names: claude-sonnet-4.6 → claude-sonnet-4-6 (dots → dashes)."""
-    if any(model.lower().startswith(p) for p in ("claude-", "gpt-", "o1-", "o3-", "grok-")):
-        return model.replace(".", "-")
+    """Pass model name through — resolution is handled by resolve_copilot_model()."""
     return model
 
 
 # Maps user-facing / alias model IDs → real GitHub Copilot model IDs.
-# Only map models that Copilot does NOT natively support.
-# claude-sonnet-4-5 / -4-6, claude-opus-4-5 / -4-6 are real Copilot model IDs
-# (listed by api.githubcopilot.com/models).  Only map legacy short names.
+# api.githubcopilot.com/models uses DOTS for version suffixes (claude-sonnet-4.5).
+# Clients often send dashes or legacy names — map them all here.
 _COPILOT_MODEL_ALIASES: Dict[str, str] = {
-    # Legacy short aliases that some clients send
-    "claude-3-5-sonnet-latest": "claude-3-5-sonnet",
-    "claude-3-7-sonnet-latest": "claude-3-7-sonnet",
+    # Legacy Claude 3.x names → nearest Claude 4 equivalent on Copilot
+    "claude-3-5-sonnet":            "claude-sonnet-4.5",
+    "claude-3-5-sonnet-latest":     "claude-sonnet-4.5",
+    "claude-3-7-sonnet":            "claude-sonnet-4.5",
+    "claude-3-7-sonnet-latest":     "claude-sonnet-4.5",
+    "claude-3-opus":                "claude-opus-4.5",
+    # Dash variants → dot variants (real Copilot API model IDs)
+    "claude-sonnet-4-5":            "claude-sonnet-4.5",
+    "claude-sonnet-4-6":            "claude-sonnet-4.6",
+    "claude-opus-4-5":              "claude-opus-4.5",
+    "claude-opus-4-6":              "claude-opus-4.6",
+    "claude-haiku-4-5":             "claude-haiku-4.5",
 }
 
 
@@ -2386,12 +2392,12 @@ async def list_models(
         {"id": "gpt-3.5-turbo", "object": "model", "created": 1677610602, "owned_by": "openai"},
         {"id": "o1-preview", "object": "model", "created": 1725648897, "owned_by": "openai"},
         {"id": "o1-mini", "object": "model", "created": 1725648897, "owned_by": "openai"},
-        {"id": "claude-3-5-sonnet", "object": "model", "created": 1716934800, "owned_by": "anthropic"},
-        {"id": "claude-3-7-sonnet", "object": "model", "created": 1740614400, "owned_by": "anthropic"},
-        {"id": "claude-sonnet-4-5", "object": "model", "created": 1748736000, "owned_by": "anthropic"},
-        {"id": "claude-sonnet-4-6", "object": "model", "created": 1756512000, "owned_by": "anthropic"},
-        {"id": "claude-opus-4-5", "object": "model", "created": 1748736000, "owned_by": "anthropic"},
-        {"id": "claude-opus-4-6", "object": "model", "created": 1756512000, "owned_by": "anthropic"},
+        {"id": "claude-sonnet-4", "object": "model", "created": 1746057600, "owned_by": "anthropic"},
+        {"id": "claude-sonnet-4.5", "object": "model", "created": 1748736000, "owned_by": "anthropic"},
+        {"id": "claude-sonnet-4.6", "object": "model", "created": 1756512000, "owned_by": "anthropic"},
+        {"id": "claude-opus-4.5", "object": "model", "created": 1748736000, "owned_by": "anthropic"},
+        {"id": "claude-opus-4.6", "object": "model", "created": 1756512000, "owned_by": "anthropic"},
+        {"id": "claude-haiku-4.5", "object": "model", "created": 1748736000, "owned_by": "anthropic"},
     ]
     static_grok_models: List[Dict[str, Any]] = [
         {"id": "grok-beta", "object": "model", "created": 1735689600, "owned_by": "xai"},

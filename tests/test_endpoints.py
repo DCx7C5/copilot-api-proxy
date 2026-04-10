@@ -276,9 +276,10 @@ async def test_chat_max_tokens_exceeded_returns_400(client, valid_cp_token):
 #  Pure-Python unit tests (model routing helpers)
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.webapi
-def test_normalize_model_name_dots_to_dashes():
-    assert normalize_model_name("claude-sonnet-4.6") == "claude-sonnet-4-6"
-    assert normalize_model_name("claude-opus-4.5") == "claude-opus-4-5"
+def test_normalize_model_name_passthrough():
+    # normalize_model_name is now a no-op; resolution via resolve_copilot_model()
+    assert normalize_model_name("claude-sonnet-4.6") == "claude-sonnet-4.6"
+    assert normalize_model_name("claude-opus-4.5") == "claude-opus-4.5"
 @pytest.mark.webapi
 def test_normalize_model_name_no_change():
     assert normalize_model_name("gpt-4o") == "gpt-4o"

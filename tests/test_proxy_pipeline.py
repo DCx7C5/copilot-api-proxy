@@ -227,13 +227,15 @@ async def test_x_api_key_header_auth(client, valid_cp_token):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_resolve_copilot_model_alias():
-    assert resolve_copilot_model("claude-3-5-sonnet-latest") == "claude-3-5-sonnet"
-    assert resolve_copilot_model("claude-3-7-sonnet-latest") == "claude-3-7-sonnet"
+    # Legacy names → real Copilot API model IDs (dot format)
+    assert resolve_copilot_model("claude-3-5-sonnet-latest") == "claude-sonnet-4.5"
+    assert resolve_copilot_model("claude-3-7-sonnet-latest") == "claude-sonnet-4.5"
 
 
 def test_resolve_copilot_model_passthrough():
     assert resolve_copilot_model("gpt-4o") == "gpt-4o"
-    assert resolve_copilot_model("claude-sonnet-4-5") == "claude-sonnet-4-5"
+    # Dash variants are aliased to dot format
+    assert resolve_copilot_model("claude-sonnet-4-5") == "claude-sonnet-4.5"
 
 
 @pytest.mark.asyncio
@@ -542,7 +544,7 @@ async def test_chat_model_alias_resolved(client, valid_cp_token):
     assert r.status_code == 200
     # Verify the resolved model was sent to the backend
     sent_body = json.loads(route.calls.last.request.content)
-    assert sent_body["model"] == "claude-3-5-sonnet"
+    assert sent_body["model"] == "claude-sonnet-4.5"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -588,8 +590,9 @@ async def test_grok_web_model_no_cookie_returns_401(client, valid_cp_token):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_normalize_model_name_claude_dots():
-    assert normalize_model_name("claude-sonnet-4.5") == "claude-sonnet-4-5"
-    assert normalize_model_name("claude-opus-4.6") == "claude-opus-4-6"
+    # normalize_model_name is now a no-op — dots are preserved for the Copilot API
+    assert normalize_model_name("claude-sonnet-4.5") == "claude-sonnet-4.5"
+    assert normalize_model_name("claude-opus-4.6") == "claude-opus-4.6"
 
 
 def test_normalize_model_name_o3():
