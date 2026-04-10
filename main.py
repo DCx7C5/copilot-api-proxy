@@ -3,6 +3,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import inspect
 import json
 import logging
 import time
@@ -14,6 +15,11 @@ from datetime import datetime, timezone as _utc
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import sys
+
+# Monkey-patch: asyncio.iscoroutinefunction is deprecated in Python 3.14+
+# and slated for removal in 3.16. slowapi 0.1.9 still uses it; redirect to
+# inspect.iscoroutinefunction until slowapi ships a fix.
+asyncio.iscoroutinefunction = inspect.iscoroutinefunction  # type: ignore[attr-defined]
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Depends
